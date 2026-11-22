@@ -115,8 +115,8 @@ export interface ProviderConfig {
   priceInput?: number
   priceOutput?: number
   priceCachedInput?: number
-  /** DeepSeek 峰谷价（错峰优惠）：错峰时段内按折扣系数计价。 */
-  priceOffPeak?: ProviderOffPeakPricing
+  /** DeepSeek 峰谷价：填写单价按空闲价计，高峰时段按系数放大。 */
+  pricePeakValley?: ProviderPeakValleyPricing
 }
 
 export interface FailoverConfig {
@@ -964,7 +964,7 @@ export class OpenAICompatibleNarrator implements NarrativeProvider {
       task, providerLabel: provider.label, model,
       ...parsed,
       priceInput: provider.priceInput, priceOutput: provider.priceOutput, priceCachedInput: provider.priceCachedInput,
-      priceOffPeak: provider.priceOffPeak,
+      pricePeakValley: provider.pricePeakValley,
     })
   }
 
@@ -1605,18 +1605,15 @@ function chatTextCandidates(response: ChatCompletionResponse) {
     .filter((text, index, values) => !!text && values.indexOf(text) === index)
 }
 
-/** DeepSeek 峰谷价（错峰优惠）计价配置。时段固定按北京时间判定——这是
- * DeepSeek 官方计费口径，与故事时区无关；默认窗口 00:30–08:30 五折。 */
-export interface ProviderOffPeakPricing {
+/** DeepSeek 峰谷价（高峰/空闲计价）配置，按官方规则：工作日（不含法定节假
+ * 日）北京时间 9:00–12:00、14:00–18:00 为高峰时段；其余时段（含周末与法定
+ * 节假日全天）均为空闲时段，空闲价 = 高峰价一半。填写的单价按空闲价计。 */
+export interface ProviderPeakValleyPricing {
   enabled?: boolean
-  /** 错峰时段价格系数（乘在输入/缓存/输出三类单价上）；0.5 = 官方五折。 */
-  discount?: number
-  /** 错峰时段开始（北京时间 HH:mm）。 */
-  start?: string
-  /** 错峰时段结束（北京时间 HH:mm）；支持跨午夜写法（如 23:00–08:30）。 */
-  end?: string
-  /** 周六/周日全时段按错峰价计。 */
-  weekendAllDay?: boolean
+  /** 高峰时段价格系数（乘在输入/缓存/输出三类单价上）；官方口径空闲价 = 高峰价一半，即 2。 */
+  peakMultiplier?: number
+  /** 中国法定节假日/放假日期（YYYY-MM-DD，北京时间）：命中日期全天按空闲价计。 */
+  holidays?: string[]
 }
 
 /** Normalized token accounting for one provider response. `cachedInputTokens`
@@ -1633,7 +1630,7 @@ export interface TokenUsageRecord {
   priceOutput?: number
   priceCachedInput?: number
   /** DeepSeek 峰谷价配置；随聚合记录透传到日志行与用量落库。 */
-  priceOffPeak?: ProviderOffPeakPricing
+  pricePeakValley?: ProviderPeakValleyPricing
 }
 
 /** Accepts the OpenAI `usage` shape, DeepSeek's legacy cache fields, or anything
@@ -1661,44 +1658,39 @@ function hasUsageFields(record: TokenUsageRecord) {
 }
 
 /** 北京时间时钟（峰谷价专用）：h23 避免 en-GB 午夜输出 "24:00"。 */
-const offPeakClockFormatter = new Intl.DateTimeFormat('en-GB', {
+const peakValleyClockFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Shanghai', hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', weekday: 'short',
 })
 
-function parseOffPeakClock(value: string | undefined): number | undefined {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? '').trim())
-  if (!match) return undefined
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return undefined
-  return hour * 60 + minute
-}
+/** 官方高峰时段（当日分钟数，左闭右开）：工作日 9:00–12:00、14:00–18:00。 */
+const PEAK_WINDOWS: Array<[number, number]> = [[540, 720], [840, 1080]]
 
-/** 是否处于 DeepSeek 错峰时段（按北京时间判定，与故事时区无关）。
- * 窗口左闭右开：00:30 起、08:30 止；start > end 视为跨午夜窗口；
- * weekendAllDay 时周六/周日全日按错峰计。 */
-export function isOffPeakMoment(now: Date, pricing?: ProviderOffPeakPricing): boolean {
+/** 是否处于 DeepSeek 高峰时段（按北京时间判定，与故事时区无关）：
+ * 周一至周五且不在 holidays 列表（法定节假日全天空闲）的 9:00–12:00 / 14:00–18:00。 */
+export function isPeakMoment(now: Date, pricing?: ProviderPeakValleyPricing): boolean {
   if (!pricing?.enabled) return false
-  const parts = offPeakClockFormatter.formatToParts(now)
+  const parts = peakValleyClockFormatter.formatToParts(now)
   const part = (type: Intl.DateTimeFormatPart['type']) => parts.find(item => item.type === type)?.value ?? ''
-  if (pricing.weekendAllDay && (part('weekday') === 'Sat' || part('weekday') === 'Sun')) return true
+  if (part('weekday') === 'Sat' || part('weekday') === 'Sun') return false
+  const date = `${part('year')}-${part('month')}-${part('day')}`
+  const holidays = new Set((pricing.holidays ?? []).map(item => String(item).trim()).filter(Boolean))
+  if (holidays.has(date)) return false
   const hour = Number(part('hour'))
   const minute = Number(part('minute'))
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
-  const start = parseOffPeakClock(pricing.start) ?? 30 // 默认 00:30
-  const end = parseOffPeakClock(pricing.end) ?? 510 // 默认 08:30
   const minuteOfDay = hour * 60 + minute
-  return start <= end ? minuteOfDay >= start && minuteOfDay < end : minuteOfDay >= start || minuteOfDay < end
+  return PEAK_WINDOWS.some(([start, end]) => minuteOfDay >= start && minuteOfDay < end)
 }
 
-/** 错峰折扣系数：命中错峰窗口返回折扣（默认 0.5 = 官方五折），否则 1；
- * 折扣夹取到 [0.01, 1]，防止误填放大单价。 */
-export function offPeakDiscountMultiplier(pricing: ProviderOffPeakPricing | undefined, now: Date = new Date()): number {
-  if (!isOffPeakMoment(now, pricing)) return 1
-  const discount = pricing?.discount
-  if (typeof discount !== 'number' || !Number.isFinite(discount)) return 0.5
-  return Math.min(1, Math.max(0.01, discount))
+/** 峰谷价系数：高峰时段返回 peakMultiplier（默认 2 = 官方空闲价一半口径），
+ * 其余时段返回 1；系数夹取到 [1, 10]，防止误填把峰谷关系倒置。 */
+export function peakValleyMultiplier(pricing: ProviderPeakValleyPricing | undefined, now: Date = new Date()): number {
+  if (!isPeakMoment(now, pricing)) return 1
+  const multiplier = pricing?.peakMultiplier
+  if (typeof multiplier !== 'number' || !Number.isFinite(multiplier)) return 2
+  return Math.min(10, Math.max(1, multiplier))
 }
 
 /** Sum usage across attempts (failover/recovery each consume tokens); identity
@@ -1715,7 +1707,7 @@ export function aggregateTokenUsages(records: TokenUsageRecord[]): TokenUsageRec
   }
   if (!sawAny) return undefined
   const last = records[records.length - 1]
-  const priced = [...records].reverse().find(record => record.priceInput || record.priceOutput || record.priceCachedInput || record.priceOffPeak?.enabled)
+  const priced = [...records].reverse().find(record => record.priceInput || record.priceOutput || record.priceCachedInput || record.pricePeakValley?.enabled)
   return {
     task: last.task,
     providerLabel: last.providerLabel,
@@ -1723,29 +1715,29 @@ export function aggregateTokenUsages(records: TokenUsageRecord[]): TokenUsageRec
     inputTokens: totals.inputTokens || undefined,
     outputTokens: totals.outputTokens || undefined,
     cachedInputTokens: totals.cachedInputTokens || undefined,
-    ...(priced ? { priceInput: priced.priceInput, priceOutput: priced.priceOutput, priceCachedInput: priced.priceCachedInput, priceOffPeak: priced.priceOffPeak } : {}),
+    ...(priced ? { priceInput: priced.priceInput, priceOutput: priced.priceOutput, priceCachedInput: priced.priceCachedInput, pricePeakValley: priced.pricePeakValley } : {}),
   }
 }
 
 /** Billing for one record. Cached tokens are a subset of input tokens and are
- * billed at the cache price; everything else at the plain input price. When the
- * record carries DeepSeek off-peak pricing and the moment (Beijing time) falls
- * inside the off-peak window, the discount multiplies all three prices. */
-export function computeTokenCost(record: TokenUsageRecord, now: Date = new Date()): { inputCost: number, outputCost: number, total: number, saved: number, offPeak: boolean } | undefined {
-  const offPeak = offPeakDiscountMultiplier(record.priceOffPeak, now)
-  const priceInput = (record.priceInput ?? 0) * offPeak
-  const priceOutput = (record.priceOutput ?? 0) * offPeak
+ * billed at the cache price; everything else at the plain input price. The
+ * configured prices are the off-peak (空闲) rates; during official DeepSeek
+ * peak windows (Beijing time) the peak multiplier applies to all three prices. */
+export function computeTokenCost(record: TokenUsageRecord, now: Date = new Date()): { inputCost: number, outputCost: number, total: number, saved: number, peak: boolean } | undefined {
+  const peak = peakValleyMultiplier(record.pricePeakValley, now)
+  const priceInput = (record.priceInput ?? 0) * peak
+  const priceOutput = (record.priceOutput ?? 0) * peak
   if (priceInput <= 0 && priceOutput <= 0) return undefined
   const input = record.inputTokens ?? 0
   const output = record.outputTokens ?? 0
   const cached = Math.min(record.cachedInputTokens ?? 0, input)
   const cachedBase = record.priceCachedInput && record.priceCachedInput > 0 ? record.priceCachedInput : record.priceInput ?? 0
-  const priceCached = cachedBase * offPeak
+  const priceCached = cachedBase * peak
   const inputCost = ((input - cached) * priceInput + cached * priceCached) / 1_000_000
   const outputCost = output * priceOutput / 1_000_000
   const withoutCache = (input * priceInput + output * priceOutput) / 1_000_000
   const total = inputCost + outputCost
-  return { inputCost, outputCost, total, saved: Math.max(0, withoutCache - total), offPeak: offPeak < 1 }
+  return { inputCost, outputCost, total, saved: Math.max(0, withoutCache - total), peak: peak > 1 }
 }
 
 /** One human-readable log line: usage numbers, cache hit rate, and optional
@@ -1763,7 +1755,7 @@ export function formatTokenUsageLine(record: TokenUsageRecord): string {
   if (record.outputTokens != null) parts.push(`输出=${record.outputTokens}`)
   const cost = computeTokenCost(record)
   if (cost) {
-    parts.push(`计费合计=${cost.total.toFixed(4)}（输入 ${cost.inputCost.toFixed(4)} + 输出 ${cost.outputCost.toFixed(4)}，缓存节省 ${cost.saved.toFixed(4)}${cost.offPeak ? '；错峰价' : ''}）`)
+    parts.push(`计费合计=${cost.total.toFixed(4)}（输入 ${cost.inputCost.toFixed(4)} + 输出 ${cost.outputCost.toFixed(4)}，缓存节省 ${cost.saved.toFixed(4)}${cost.peak ? '；高峰价' : ''}）`)
   }
   return parts.join(' ')
 }

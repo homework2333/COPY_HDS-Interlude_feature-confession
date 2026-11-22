@@ -12,7 +12,7 @@ import type { DailyReportConfig } from './types'
 import type { DailyReportInput, HostStatusSnapshot } from './daily-report'
 import { localDayRange, nextDailyRun, renderDailyReport, usageRowsToAgg } from './daily-report'
 import { isOneBotPlatform, normalizeAccountId } from '../session-platform'
-import { offPeakDiscountMultiplier, type ProviderOffPeakPricing } from '../narrator'
+import { peakValleyMultiplier, type ProviderPeakValleyPricing } from '../narrator'
 import { HDS_INTERLUDE_VERSION } from '../meta'
 
 /** 日报覆盖“刚结束的这一天”：触发时刻回退一分钟取上一个自然日。 */
@@ -88,26 +88,26 @@ function managerTargets(svc: any): string[] {
 
 /* ── 用量 / 错误落库 ──────────────────────────────────────────────── */
 
-/** 按连接价格字段（每百万 token）估算单次调用费用；record.priceOffPeak 启用
- * 且 now（北京时间）处于错峰窗口时，整体按折扣系数计价。 */
+/** 按连接价格字段（每百万 token）估算单次调用费用；填写单价按空闲价计，
+ * record.pricePeakValley 启用且 now（北京时间）处于官方高峰时段时按系数放大。 */
 export function estimateTokenCost(record: {
   inputTokens?: number, outputTokens?: number, cachedInputTokens?: number,
   priceInput?: number, priceOutput?: number, priceCachedInput?: number,
-  priceOffPeak?: ProviderOffPeakPricing,
+  pricePeakValley?: ProviderPeakValleyPricing,
 }, now: Date = new Date()): number {
   const input = record.inputTokens ?? 0
   const output = record.outputTokens ?? 0
   const cached = record.cachedInputTokens ?? 0
   const uncached = Math.max(0, input - cached)
   const base = (uncached * (record.priceInput ?? 0) + cached * (record.priceCachedInput ?? 0) + output * (record.priceOutput ?? 0)) / 1_000_000
-  return base * offPeakDiscountMultiplier(record.priceOffPeak, now)
+  return base * peakValleyMultiplier(record.pricePeakValley, now)
 }
 
 export function persistUsageRecord(svc: any, record: {
   task: string, providerLabel: string, model: string,
   inputTokens?: number, outputTokens?: number, cachedInputTokens?: number,
   priceInput?: number, priceOutput?: number, priceCachedInput?: number,
-  priceOffPeak?: ProviderOffPeakPricing,
+  pricePeakValley?: ProviderPeakValleyPricing,
 }): void {
   if (typeof svc?.dbCreate !== 'function') return
   const now = new Date()
