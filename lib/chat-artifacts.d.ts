@@ -23,7 +23,7 @@ export declare function calibratedNativeFaceWillingness(semantic: NativeFaceSema
 export declare function targetableMessageId(value: unknown): string;
 export declare function groupMessageRef(entryId: number): string;
 export declare function listStickerFiles(root: string): Promise<string[]>;
-export declare function stickerMime(filePath: string): "image/gif" | "image/webp" | "image/jpeg" | "image/png";
+export declare function stickerMime(filePath: string): "image/gif" | "image/jpeg" | "image/png" | "image/webp";
 /** The old punctuation-only id could collide (for example two filenames that
  * both normalize to bq--6-). Keep a readable path prefix, then append a
  * content hash fragment so every row is globally unique and stable for an

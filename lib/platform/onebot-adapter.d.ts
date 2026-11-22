@@ -15,7 +15,7 @@ export declare class OneBotAdapter implements PlatformAdapter {
     pruneSessions(cap: number, protectKey?: string): void;
     sessionCount(): number;
     private session;
-    privateCapabilities(handle: TurnHandle | undefined): import("..").ChatActionCapabilities;
+    privateCapabilities(handle: TurnHandle | undefined): import("../types").ChatActionCapabilities;
     stickerCatalog(handle: TurnHandle | undefined, turnQueryEmbedding?: number[]): Promise<import('../types').StickerCatalogEntry[]>;
     loadImages(story: InterludeStory, sources: string[], handle: TurnHandle | undefined): Promise<NarrativeImage[]>;
     loadAudio(story: InterludeStory, sources: string[], handle: TurnHandle | undefined, maxCount?: number): Promise<NarrativeAudio[]>;
@@ -24,8 +24,8 @@ export declare class OneBotAdapter implements PlatformAdapter {
     sendSticker(story: InterludeStory, handle: TurnHandle | undefined, channelId: string, asset: StickerAsset, groupId?: string, reference?: ScriptDeliveryReference): Promise<boolean>;
     sendNativeFace(story: InterludeStory, handle: TurnHandle | undefined, channelId: string, semantic: NativeFaceSemantic, groupId?: string, reference?: ScriptDeliveryReference): Promise<boolean>;
     adoptSession(session: unknown): TurnHandle | undefined;
-    groupCapabilities(handle: TurnHandle | undefined, messages: unknown[]): import("..").ChatActionCapabilities;
-    historicalImages(story: InterludeStory, refs: unknown, limit: number, handle: TurnHandle | undefined, currentSources?: string[]): Promise<import("..").NarrativeHistoricalImage[]>;
+    groupCapabilities(handle: TurnHandle | undefined, messages: unknown[]): import("../types").ChatActionCapabilities;
+    historicalImages(story: InterludeStory, refs: unknown, limit: number, handle: TurnHandle | undefined, currentSources?: string[]): Promise<import("../types").NarrativeHistoricalImage[]>;
     sendGroupMessage(story: InterludeStory, channelId: string, content: string, replyTo?: string, handle?: TurnHandle, shouldCancel?: () => boolean): Promise<{
         deliveredSegments: string[];
         complete: boolean;

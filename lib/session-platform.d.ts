@@ -156,3 +156,14 @@ export declare function manageSessionDenialReason(input: {
     managers?: string[];
 }): ManageSessionDenial | undefined;
 export declare function isEnabledAccount(accounts: OneBotAccountRule[] | undefined, qq: string): boolean;
+export declare function resolveProactiveOffUsers(config: {
+    onebot?: {
+        userAccounts?: OneBotAccountRule[];
+    };
+    sharedStory?: {
+        proactiveContacts?: {
+            mode?: string;
+            list?: unknown;
+        };
+    };
+}): Set<string>;

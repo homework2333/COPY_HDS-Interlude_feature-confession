@@ -11,6 +11,8 @@ import { DailyQuotaTracker, StickerHarvestConfig, StickerHarvestStore } from './
 import { ResearchConfig, ResearchDesk } from './research/desk';
 import { type ConfigReadResult, type ConfigSaveResult } from './console/contract';
 import { ModelRoutingTable } from './model-routing';
+import { OpsEventBus } from './ops/events';
+import type { OpsConfig } from './ops/types';
 export { isBotOnlineStatus } from './session-platform';
 export { extractSessionVoiceCount, extractSessionAudioSources, SessionFileFact, extractSessionFileFacts, describeGroupAttachments, withTransportTimeout, guessAudioFormat } from './session-platform';
 export { calibratedNativeFaceWillingness, stableStickerAssetId, stickerDeliveryUrl, stickerFileUrl, extractUserReportedTimes, describeQuotedMessage, normalizeQuotedMessageContent, normalizeAllowedReactions, normalizeTimelinePlan, describeTimelinePlanRejection, timelineEntryPromptProjection, normalizeGroupChatActions, formatGroupSpeaker } from './chat-artifacts';
@@ -149,6 +151,8 @@ export interface Config {
     schedulePreplan?: SchedulePreplanConfig;
     /** 实验性：主叙事微调数据采集（原始输入/输出 JSONL）；盲模式下强制关闭。 */
     modelCapture?: ModelCaptureConfig;
+    /** 运维套件：日报、白名单申请、调试事件流。 */
+    ops?: OpsConfig;
     /** 实验性：考据 Agent——资料案头为作者供应经核实的写作参考。 */
     research?: ResearchConfig;
 }
@@ -167,6 +171,9 @@ export interface OneBotAccountRule {
     personId?: string;
     profile?: string;
     relationship?: string;
+    /** Per-account proactive switch: false keeps normal DMs but the character
+     * never initiates contact with this account. Absent means allowed. */
+    proactive?: boolean;
 }
 export interface OneBotNapCatConfig {
     /** When false (or omitted for old configurations), OneBot access is unchanged. */
@@ -397,6 +404,12 @@ export interface ParticipantPreset {
     relationship: string;
     enabled: boolean;
 }
+/** Who may receive proactive messages. Layered on top of the global
+ * runtime.allowProactiveMessages switch and per-account opt-outs. */
+export interface ProactiveContactsPolicy {
+    mode: 'all' | 'none' | 'blacklist' | 'whitelist';
+    list: string[];
+}
 export interface SharedStoryConfig {
     /** One main story per bot account. Kept configurable for a safe rollback. */
     enabled?: boolean;
@@ -412,6 +425,8 @@ export interface SharedStoryConfig {
     participantContextLimit: number;
     /** Empty keeps legacy behaviour; otherwise only these QQs may run global management commands. */
     managerAccounts: string[];
+    /** Scope policy for proactive messages (per-user opt-out plus mode/list). */
+    proactiveContacts?: ProactiveContactsPolicy;
     /** Optional QQ-to-person presets; accounts with the same personId share identity notes. */
     /** @deprecated Use onebot.userAccounts identity fields in new configs. */
     participantPresets?: ParticipantPreset[];
@@ -662,6 +677,11 @@ export declare class InterludeService extends Service {
     private cachedModelCaptureConfig?;
     /** P3: Console 健康面板的内存滚动指标（重载后归零）。 */
     readonly health: HealthMonitor;
+    /** 运维事件总线（调试页实时流的数据源）。容量取 ops.debugStream.maxEvents。 */
+    opsBus: OpsEventBus;
+    /** 进程启动时刻（日报的运行时长来源）。 */
+    readonly bootedAt: number;
+    get opsConfig(): OpsConfig;
     /** Token 用量到达时可能尚未有 canonical story——用最近活跃的 storyId 记账。
      * P3 Fix: constructor 末尾初始化为当前 canonical story，减少首轮漏记。 */
     private lastActiveStoryId?;
@@ -2073,6 +2093,9 @@ export declare class InterludeService extends Service {
     private writeStandalone;
     resolveCompactionFacts(storyId: string, value: unknown, allowedIds: ReadonlySet<number>, now: Date): Promise<boolean>;
     markContinuityDirty(storyId: string, now: Date): Promise<void>;
+    /** 运维事件流：与 emitLog 同源的日志进入调试总线；warn/error 额外落库。
+     * 注意：盲模式下 writeReport/writeStandalone 提前返回，事件流同样静默。 */
+    opsPublishLog(level: 'error' | 'warn' | 'info' | 'debug', phase: string, protagonist: string, message: string): void;
     private emitLog;
     private reportBlindModeHealth;
     private allowsVerbosity;

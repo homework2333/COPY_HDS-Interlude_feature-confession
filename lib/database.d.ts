@@ -4,6 +4,7 @@ import type { QzonePostRecord } from './qzone';
 import type { EndpointRow, EndpointStateRecord, StoryAliasRecord } from './endpoints';
 import type { WorkRow } from './works';
 import type { LongArcGuidanceRow, LongArcProgressRow } from './long-arc';
+import type { AccessRequestRow, OpsLogRow, UsageLogRow } from './ops/tables';
 declare module 'koishi' {
     interface Tables {
         interlude_story: InterludeStory;
@@ -27,6 +28,9 @@ declare module 'koishi' {
         interlude_long_arc_progress: LongArcProgressRow;
         interlude_story_alias: StoryAliasRecord;
         interlude_work: WorkRow;
+        interlude_usage_log: UsageLogRow;
+        interlude_ops_log: OpsLogRow;
+        interlude_access_request: AccessRequestRow;
     }
 }
 export declare function registerTables(ctx: Context): void;

@@ -1,14 +1,5 @@
-/**
- * 运行时天气服务：Open-Meteo 免费拉取 → 中文快照 → world-event 剧本条目注入。
- *
- * 设计原则（与提案 #IKL4DY 对齐,经审查调整后）:
- * - 注入格式为纯数据("环境：22°C 小毛毛雨。"),不含建议句/观测点地名,不引导叙事
- * - 复用 interlude_seeded_event + world-event 管道(非 admin-note),零新增剧本类型
- * - 滚动替换:每次注入前把上一条天气事件标 expired,时间线上只保留最新一条
- * - 地点解析:优先从 story.setting.location 自动地理编码,失败回退手动经纬度
- * - 架空世界跳过:手动开关 AND 世界描述含架空关键词(异世界/精灵/架空/幻想/另一个世界)
- */
 import type { Context } from 'koishi';
+export type WeatherProvider = 'open-meteo' | 'qweather';
 export interface WeatherConfig {
     enabled: boolean;
     /** 手动观测点(经纬度);autoFromLocation 开启时仅作回退 */
@@ -19,6 +10,19 @@ export interface WeatherConfig {
     /** 手动开关:架空世界(异世界/精灵/架空)跳过天气注入 */
     skipFantasyWorld: boolean;
     cadenceMinutes: number;
+    /** 数据源;缺省视为 open-meteo(向后兼容旧配置与直接构造的调用方) */
+    provider?: WeatherProvider;
+    /** 和风天气专属 API Host(控制台项目设置提供,如 xxx.re.qweatherapi.com) */
+    qweatherHost?: string;
+    /** 认证方式:ed25519=自动签发 JWT;apikey=固定 API Key */
+    qweatherAuth?: 'ed25519' | 'apikey';
+    qweatherApiKey?: string;
+    qweatherKid?: string;
+    qweatherSub?: string;
+    qweatherIss?: string;
+    qweatherJwtTtlMinutes?: number;
+    /** Ed25519 私钥(PEM);resolveWeatherConfig 会统一剥掉 \r */
+    qweatherPrivateKey?: string;
 }
 export declare const DEFAULT_WEATHER_CONFIG: WeatherConfig;
 export declare function resolveWeatherConfig(value: unknown): WeatherConfig;
