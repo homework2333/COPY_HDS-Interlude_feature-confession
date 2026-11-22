@@ -889,7 +889,8 @@ export class InterludeService extends Service {
   readonly bootedAt = Date.now()
 
   get opsConfig(): OpsConfig {
-    return ((this.config as any).ops ?? {}) as OpsConfig
+    // 桩宿主（测试用 Object.create）可能没有 config；ops 挂点必须永不抛错。
+    return ((this.config as any)?.ops ?? {}) as OpsConfig
   }
   /** Token 用量到达时可能尚未有 canonical story——用最近活跃的 storyId 记账。
    * P3 Fix: constructor 末尾初始化为当前 canonical story，减少首轮漏记。 */
@@ -4496,7 +4497,7 @@ export class InterludeService extends Service {
       participant?.id ?? '', permittedParticipantIds, permittedGroupIds, phase, this.memoryConfig, refreshContinuity,
     )
     // 调试事件流：主叙事续写完成即推送（文本受 ops.debugStream.scriptPreview 门控）。
-    if (this.opsConfig.debugStream?.enabled !== false) {
+    if (this.opsBus && this.opsConfig.debugStream?.enabled !== false) {
       const interaction = decision.interaction
       const decisionSummary = !interaction ? '（无交互决定）'
         : `${interaction.seen ? '已读' : '未读'} · 回复=${interaction.reply?.mode ?? 'none'}`
@@ -7280,7 +7281,7 @@ export class InterludeService extends Service {
     // 直接抛 TypeError，且发生在叙事管线关键路径上会造成死锁。防御式回退到
     // 故事 ID，日志层永不成为故障源。
     const protagonist = story.setting?.character?.name ?? story.id
-    this.opsPublishLog(level, phaseLabel(phase), protagonist, rendered)
+    ;(this as any).opsPublishLog?.(level, phaseLabel(phase), protagonist, rendered)
     const communicationAction = communication
       ? communication.domain === 'policy' ? 'warning' as const
         : communication.domain === 'transport' ? 'send' as const
@@ -7314,7 +7315,7 @@ export class InterludeService extends Service {
    * optional billing from the per-connection price fields. */
   private reportTokenUsage(record: TokenUsageRecord) {
     this.desktopEventSink?.('token', record)
-    if (this.opsConfig.debugStream?.enabled !== false) {
+    if (this.opsBus && this.opsConfig.debugStream?.enabled !== false) {
       this.opsBus.publish({
         kind: 'usage',
         task: String(record.task ?? 'unknown'), providerLabel: record.providerLabel ?? '', model: record.model ?? '',
@@ -7343,7 +7344,7 @@ export class InterludeService extends Service {
     const rank = { silent: 0, error: 1, warn: 2, info: 3, debug: 4 }
     const logging = this.config.logging ?? { level: 'info' as const, format: 'layered' as const, colors: true, colorTheme: 'dark' as const, kaomoji: true }
     if (rank[logging.level] < rank[level]) return
-    this.opsPublishLog(level, 'system', 'HDSI', renderLogMessage(message, args))
+    ;(this as any).opsPublishLog?.(level, 'system', 'HDSI', renderLogMessage(message, args))
     const output = logging.format === 'layered'
       ? formatLayeredLog({
         level, protagonist: 'HDSI', message, args, standalone: true,
@@ -7374,8 +7375,8 @@ export class InterludeService extends Service {
 
   /** 运维事件流：与 emitLog 同源的日志进入调试总线；warn/error 额外落库。
    * 注意：盲模式下 writeReport/writeStandalone 提前返回，事件流同样静默。 */
-  private opsPublishLog(level: 'error' | 'warn' | 'info' | 'debug', phase: string, protagonist: string, message: string) {
-    if (this.opsConfig.debugStream?.enabled === false) return
+  opsPublishLog(level: 'error' | 'warn' | 'info' | 'debug', phase: string, protagonist: string, message: string) {
+    if (!this.opsBus || this.opsConfig.debugStream?.enabled === false) return
     this.opsBus.publish({ kind: 'log', level, message, phase, protagonist })
     if (level === 'error' || level === 'warn') persistOpsLog(this, level, phase, message)
   }

@@ -65,6 +65,19 @@ test('existing installations extend raw script entries with persistent embedding
       unknownCount: 'unsigned', lastGenerationScore: 'double', lastGenerationEntryId: 'unsigned',
       updatedAt: 'timestamp',
     } },
+    { name: 'interlude_usage_log', fields: {
+      id: 'unsigned', ts: 'timestamp', task: 'string(63)', providerLabel: 'string(127)',
+      model: 'string(127)', inputTokens: 'unsigned', outputTokens: 'unsigned',
+      cachedInputTokens: 'unsigned', cost: 'double',
+    } },
+    { name: 'interlude_ops_log', fields: {
+      id: 'unsigned', ts: 'timestamp', level: 'string(16)', phase: 'string(63)', message: 'text',
+    } },
+    { name: 'interlude_access_request', fields: {
+      id: 'unsigned', qq: 'string(63)', displayName: 'string(255)', source: 'string(32)',
+      firstRequestAt: 'timestamp', lastRequestAt: 'timestamp', attempts: 'unsigned',
+      status: 'string(16)', decidedAt: 'timestamp', note: 'text',
+    } },
   ])
 })
 
@@ -122,6 +135,19 @@ test('knowledge evidence is an additive nullable field and reload does not rebui
       privateCount: 'unsigned', privateScore: 'double', groupCount: 'unsigned', groupScore: 'double',
       unknownCount: 'unsigned', lastGenerationScore: 'double', lastGenerationEntryId: 'unsigned',
       updatedAt: 'timestamp',
+    } },
+    { name: 'interlude_usage_log', fields: {
+      id: 'unsigned', ts: 'timestamp', task: 'string(63)', providerLabel: 'string(127)',
+      model: 'string(127)', inputTokens: 'unsigned', outputTokens: 'unsigned',
+      cachedInputTokens: 'unsigned', cost: 'double',
+    } },
+    { name: 'interlude_ops_log', fields: {
+      id: 'unsigned', ts: 'timestamp', level: 'string(16)', phase: 'string(63)', message: 'text',
+    } },
+    { name: 'interlude_access_request', fields: {
+      id: 'unsigned', qq: 'string(63)', displayName: 'string(255)', source: 'string(32)',
+      firstRequestAt: 'timestamp', lastRequestAt: 'timestamp', attempts: 'unsigned',
+      status: 'string(16)', decidedAt: 'timestamp', note: 'text',
     } },
   ])
 })

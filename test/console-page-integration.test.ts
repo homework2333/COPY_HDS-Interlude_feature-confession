@@ -257,6 +257,6 @@ test('configuration menu RPC tolerates null produced by real Console JSON transp
   const client = new Client(ctx, { addEventListener() {}, send: (value: string) => responses.push(JSON.parse(value)) } as any)
   await client.receive({ data: JSON.stringify({ id: 'menu', type: 'hdsi/config-center/read', args: [undefined] }) } as any)
   assert.equal(responses[0].body.value.ok, true)
-  assert.equal(responses[0].body.value.menu.flatMap((group: any) => group.sections).length, 25)
+  assert.equal(responses[0].body.value.menu.flatMap((group: any) => group.sections).length, 26)
   assert.equal(responses[0].body.value.schema, undefined)
 })

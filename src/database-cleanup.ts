@@ -11,6 +11,7 @@ export const RUNTIME_TABLES = [
   'interlude_participant', 'interlude_seeded_event', 'interlude_qzone_post', 'interlude_work',
   'interlude_story', 'interlude_long_arc_guidance', 'interlude_long_arc_progress',
   'interlude_endpoint', 'interlude_endpoint_state', 'interlude_story_alias',
+  'interlude_usage_log', 'interlude_ops_log', 'interlude_access_request',
 ] as const
 export type RuntimeTable = typeof RUNTIME_TABLES[number]
 
@@ -45,6 +46,9 @@ export function cleanupPayload(table: RuntimeTable, row: Record<string, any>, se
     case 'interlude_endpoint_state': return { state: freshEndpointState(String(row.endpointId)) }
     case 'interlude_story_alias': return { canonicalStoryId: '', reason: text }
     case 'interlude_qzone_post': return { status: 'failed', content: text, tid: '', targetUin: '', error: text, commentNum: 0, createdAt: new Date(0), postedAt: new Date(0) }
+    case 'interlude_usage_log': return { task: text, providerLabel: '', model: '', inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cost: 0 }
+    case 'interlude_ops_log': return { level: 'warn', phase: 'system', message: text }
+    case 'interlude_access_request': return { status: 'rejected', displayName: '', source: 'console', note: text, attempts: 0 }
     case 'interlude_work': {
       // Retain a decodable redacted document while retiring every old job ID and CAS.
       const id = randomUUID()

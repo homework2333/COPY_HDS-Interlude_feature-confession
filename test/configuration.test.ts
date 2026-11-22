@@ -11,7 +11,7 @@ const now = new Date('2026-09-09T12:00:00Z')
 test('Console sections follow the documented setup order', () => {
   assert.deepEqual(Object.keys(Config.dict), [
     'presetSync', 'storyDefaults', 'model', 'onebot', 'sharedStory', 'runtime', 'urge', 'schedulePreplan', 'timelineDirector', 'agency', 'deliveryPolicy',
-    'chatActions', 'stickers', 'memory', 'alterSystem', 'browser', 'worldSeeder', 'weather', 'longHorizon', 'qzone', 'blindMode', 'logging', 'modelCapture', 'research', 'mainPrompt', 'chatRhythm',
+    'chatActions', 'stickers', 'memory', 'alterSystem', 'browser', 'worldSeeder', 'weather', 'longHorizon', 'qzone', 'blindMode', 'logging', 'modelCapture', 'research', 'mainPrompt', 'chatRhythm', 'ops',
   ])
   // 分类前缀让配置页按 必填→结构→节奏→表达→内在→扩展→维护 分组可读。
   const headers = Object.values(Config.dict).map((item: any) => String(item.meta?.description ?? ''))
@@ -362,7 +362,7 @@ test('visible Console section numbers are unique and continuous', () => {
     const match = String(item.meta?.description ?? '').match(/^【[^】]+ (\d+)】/)
     return match ? [Number(match[1])] : []
   })
-  assert.deepEqual(numbers, Array.from({ length: 22 }, (_, index) => index + 1))
+  assert.deepEqual(numbers, Array.from({ length: 23 }, (_, index) => index + 1))
 })
 
 test('candidate reveal description distinguishes inactive, vague and revealed candidates', () => {

@@ -27,10 +27,11 @@ test('#20 P1a：侧任务非法 JSON 的错误信息带原文摘录（压空白�
 })
 
 test('#20 P1b：叙事提供商失败日志 warn 级 + 端点主机；Token 用量带来源（源码钉）', async () => {
-  const narratorSource = readFileSync('src/narrator.ts', 'utf8')
+  const normalizeEol = (text: string) => text.replace(/\r\n/g, '\n') // Windows checkout(CRLF)下多行源码钉标记会失配，先归一化行尾
+  const narratorSource = normalizeEol(readFileSync('src/narrator.ts', 'utf8'))
   assert.ok(narratorSource.includes("this.logger?.warn?.(\n              '叙事模型服务商失败"), '提供商失败从 debug 提到 warn')
   assert.ok(narratorSource.includes('providerEndpointHost(provider.endpoint)'), '失败日志带端点主机')
-  const serviceSource = readFileSync('src/service.ts', 'utf8')
+  const serviceSource = normalizeEol(readFileSync('src/service.ts', 'utf8'))
   assert.ok(serviceSource.includes('来源=${record.providerLabel ||'), 'Token 用量日志带实际应答来源')
 })
 

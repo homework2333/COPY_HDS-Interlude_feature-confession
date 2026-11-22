@@ -74,7 +74,8 @@ test('tier resolution clamps values into a sane range and tolerates junk', () =>
 
 test('group replay duplicates do not double-count density (audit: record sits after dedup)', () => {
   // 结构断言：receiveGroup 内 contextDensity.record 必须出现在群去重块之后。
-  const source = require('node:fs').readFileSync('src/inbound-gate.ts', 'utf8') // P8-S5：receiveGroup/receive 迁至 inbound-gate，标记随代码逐字搬运
+  // 行尾归一化：源码钉标记在 CRLF checkout 下失配。P8-S5：receiveGroup/receive 迁至 inbound-gate，标记随代码逐字搬运
+  const source = require('node:fs').readFileSync('src/inbound-gate.ts', 'utf8').replace(/\r\n/g, '\n')
   const recordPos = source.indexOf('密度计数在去重之后：桌面超时-重放的同一条群消息不得双计')
   const dedupPos = source.indexOf('桥接重放去重命中（群聊）')
   assert.ok(recordPos > 0 && dedupPos > 0, '两个标记都存在')

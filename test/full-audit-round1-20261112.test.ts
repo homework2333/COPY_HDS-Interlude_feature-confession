@@ -64,7 +64,8 @@ test('F01 production Console installation registers a directory with loadable JS
   const packagedRequire = createRequire(resolve(root, 'lib/index.js'))
   const localRequire = Object.assign((name: string) => name === './rpc' ? { installConfigRpc: noop }
     : name === './config-center' ? { installConfigCenterRpc: noop }
-    : name === './actions' ? { installActionsRpc: noop } : packagedRequire(name), { resolve: packagedRequire.resolve })
+    : name === './actions' ? { installActionsRpc: noop }
+    : name === './ops' ? { installOpsRpc: noop } : packagedRequire(name), { resolve: packagedRequire.resolve })
   const exports: any = {}
   runInNewContext(source, { exports, require: localRequire, __dirname: resolve(root, 'lib') })
   let registered: any

@@ -98,6 +98,7 @@ export function persistUsageRecord(svc: any, record: {
   inputTokens?: number, outputTokens?: number, cachedInputTokens?: number,
   priceInput?: number, priceOutput?: number, priceCachedInput?: number,
 }): void {
+  if (typeof svc?.dbCreate !== 'function') return
   void svc.dbCreate('interlude_usage_log', {
     ts: new Date(), task: String(record.task ?? 'unknown').slice(0, 63),
     providerLabel: String(record.providerLabel ?? '').slice(0, 127),
@@ -111,6 +112,7 @@ export function persistUsageRecord(svc: any, record: {
 
 export function persistOpsLog(svc: any, level: 'error' | 'warn', phase: string, message: string): void {
   if (opsConfig(svc).debugStream?.persistErrors === false) return
+  if (typeof svc?.dbCreate !== 'function') return
   void svc.dbCreate('interlude_ops_log', {
     ts: new Date(), level, phase: String(phase ?? 'system').slice(0, 63),
     message: String(message ?? '').slice(0, 2_000),
