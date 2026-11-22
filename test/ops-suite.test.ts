@@ -128,7 +128,7 @@ function fakeSvc(ctx: any) {
   svc.config = {
     storyDefaults: { timezone: 'Asia/Shanghai' },
     onebot: { enabled: true, userAccounts: [] },
-    sharedStory: { managerAccounts: ['2812476708'] },
+    sharedStory: { managerAccounts: ['10001'] },
     ops: { accessRequests: { enabled: true, autoReply: true } },
   }
   svc.sharedStoryConfig = svc.config.sharedStory
@@ -168,7 +168,7 @@ test('白名单申请：记录、通知、每日一次礼貌回复、审批落�
       assert.equal(rows[0].status, 'pending')
       assert.equal(rows[0].attempts, 2)
       // 通知管理员 2 次（每次陌生消息都通知），礼貌回复只 1 次（每日一次）。
-      assert.equal(sent.filter(item => item.qq === '2812476708').length, 2)
+      assert.equal(sent.filter(item => item.qq === '10001').length, 2)
       assert.equal(sent.filter(item => item.qq === '999888777').length, 1)
       // 审批：未申请过的 QQ 直接授权也建行。
       const decided = await runtime.recordAccessDecision(svc, '999888777', true, '朋友')
@@ -285,15 +285,15 @@ test('sendOpsPrivate：走 bot.sendMessage("private:<qq>")（Bot 基类没有 se
     reportStandalone: captureWarn,
   }
   // 好路径：命中第一个 bot，通道带 private: 前缀。
-  assert.equal(await runtime.sendOpsPrivate(svc, '2812476708', '测试'), true)
-  assert.deepEqual(calls, [{ bot: 'a', channelId: 'private:2812476708', text: '测试' }])
+  assert.equal(await runtime.sendOpsPrivate(svc, '10001', '测试'), true)
+  assert.deepEqual(calls, [{ bot: 'a', channelId: 'private:10001', text: '测试' }])
   // 坏路径：所有 bot 都抛错 → 返回 false，且错误进了 ops 告警（不再静默）。
   const failing: any = { ctx: { bots: [bots[1]] }, reportStandalone: captureWarn }
-  assert.equal(await runtime.sendOpsPrivate(failing, '2812476708', '测试'), false)
+  assert.equal(await runtime.sendOpsPrivate(failing, '10001', '测试'), false)
   assert.equal(warns.some(item => item.includes('私聊发送失败') && item.includes('bot b offline')), true)
   // 非 OneBot 平台的 bot 不尝试。
   const otherOnly: any = { ctx: { bots: [{ platform: 'discord', sendMessage: async () => { throw new Error('wrong platform') } }] }, reportStandalone: () => undefined }
-  assert.equal(await runtime.sendOpsPrivate(otherOnly, '2812476708', '测试'), false)
+  assert.equal(await runtime.sendOpsPrivate(otherOnly, '10001', '测试'), false)
   // 目标无法归一化 → 直接 false。
   assert.equal(await runtime.sendOpsPrivate(svc, '', '测试'), false)
 })
