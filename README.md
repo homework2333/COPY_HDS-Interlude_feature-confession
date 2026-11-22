@@ -1,3 +1,18 @@
+> [!WARNING]
+> **这不是官方仓库。**
+>
+> 本仓库是 [HDS Interlude / 幕间系统](https://github.com/ISEKAI-MomoiCore/HDS-Interlude) 的个人开发 fork，
+> 仅用于功能开发与 PR 中转，代码未经官方审核。安装请使用官方发布版：
+> [Gitee Releases](https://gitee.com/MomoiCore/HDS-Interlude/releases) ·
+> [GitHub Releases](https://github.com/ISEKAI-MomoiCore/HDS-Interlude/releases)。
+>
+> 分支说明：
+> - `master` —— 跟随官方的原始代码
+> - `feat/weather-qweather` —— 和风天气数据源（已提 PR #27）
+> - `feat/ops-suite` —— 运维套件 · 防虚构 REALITY GATE · 调用分析页（未提 PR）
+>
+> 许可证 [AGPL-3.0](LICENSE) 随上游完整保留。
+
 # HDS Interlude / 幕间系统
 
 ![HDS Interlude 幕间系统：持续叙事、流动时间与角色生活](docs/assets/readme/cover.png)
