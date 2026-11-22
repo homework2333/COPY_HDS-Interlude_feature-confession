@@ -4,6 +4,7 @@ import type { DailyReportConfig } from './types';
 import type { DailyReportInput, HostStatusSnapshot } from './daily-report';
 import { renderDailyReport } from './daily-report';
 export declare function dailyReportConfig(svc: any): DailyReportConfig;
+export declare function storyTimezone(svc: any): string;
 export declare function sendOpsPrivate(svc: any, qq: string, text: string): Promise<boolean>;
 /** 按连接价格字段（每百万 token）估算单次调用费用。 */
 export declare function estimateTokenCost(record: {

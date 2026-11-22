@@ -5,6 +5,7 @@
  * - hdsi/lists/save      保存私聊用户/群聊白名单（经配置中心管线持久化）
  * - hdsi/lists/decide    审批白名单申请（approve 时同步写入 onebot.userAccounts）
  * - hdsi/ops/report      日报预览（authority=3，与 interlude.日报 同源）
+ * - hdsi/ops/usage       调用分析：用量汇总/趋势分桶/最近流水（authority=1，30s 轮询）
  *
  * 调试页刷新采用轮询（客户端 2s 拉 hdsi/ops/recent）：本版 @koishijs/plugin-console
  * 无通用 broadcast 通道，DataService 全量推送在事件密集时开销过大。
@@ -12,6 +13,7 @@
 import type { Context, Schema } from 'koishi';
 import type { InterludeService } from '../service';
 import type { AccessRequestRow } from '../ops/tables';
+import { type UsageAnalyticsResult } from '../ops/usage-analytics';
 import type { OpsEvent, OpsStreamStats } from '../ops/types';
 export interface ListsUserRow {
     qq: string;
@@ -91,6 +93,10 @@ declare module '@koishijs/console' {
             text?: string;
             error?: string;
         }>;
+        'hdsi/ops/usage'(payload: {
+            preset?: string;
+            limit?: number;
+        }): Promise<UsageAnalyticsResult>;
     }
 }
 export declare function installOpsRpc(ctx: Context, host: InterludeService, configSchema: Schema): void;
