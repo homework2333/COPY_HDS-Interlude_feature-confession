@@ -267,3 +267,33 @@ test('gatherUsageAnalytics：dbGet 视图聚合出 totals/byTask/buckets/recent'
   assert.equal(main.calls, 1)
   assert.equal(main.cachedInputTokens, 100)
 })
+
+/* ── sendOpsPrivate 回归：必须用通用 sendMessage API ──────────────── */
+
+test('sendOpsPrivate：走 bot.sendMessage("private:<qq>")（Bot 基类没有 sendPrivateMsg）', async () => {
+  const runtime = await import('../src/ops/runtime')
+  const calls: Array<{ bot: string, channelId: string, text: string }> = []
+  // 两个 bot：前者模拟真实 Koishi（只有 sendMessage），后者抛错验证降级。
+  const bots = [
+    { platform: 'onebot', sendMessage: async (channelId: string, content: string) => { calls.push({ bot: 'a', channelId, text: content }); return ['1'] } },
+    { platform: 'onebot', sendMessage: async () => { throw new Error('bot b offline') } },
+  ]
+  const warns: string[] = []
+  const captureWarn = (level: string, msg: string, ...rest: unknown[]) => warns.push(`${level}:${msg} ${rest.join(' ')}`)
+  const svc: any = {
+    ctx: { bots },
+    reportStandalone: captureWarn,
+  }
+  // 好路径：命中第一个 bot，通道带 private: 前缀。
+  assert.equal(await runtime.sendOpsPrivate(svc, '2812476708', '测试'), true)
+  assert.deepEqual(calls, [{ bot: 'a', channelId: 'private:2812476708', text: '测试' }])
+  // 坏路径：所有 bot 都抛错 → 返回 false，且错误进了 ops 告警（不再静默）。
+  const failing: any = { ctx: { bots: [bots[1]] }, reportStandalone: captureWarn }
+  assert.equal(await runtime.sendOpsPrivate(failing, '2812476708', '测试'), false)
+  assert.equal(warns.some(item => item.includes('私聊发送失败') && item.includes('bot b offline')), true)
+  // 非 OneBot 平台的 bot 不尝试。
+  const otherOnly: any = { ctx: { bots: [{ platform: 'discord', sendMessage: async () => { throw new Error('wrong platform') } }] }, reportStandalone: () => undefined }
+  assert.equal(await runtime.sendOpsPrivate(otherOnly, '2812476708', '测试'), false)
+  // 目标无法归一化 → 直接 false。
+  assert.equal(await runtime.sendOpsPrivate(svc, '', '测试'), false)
+})

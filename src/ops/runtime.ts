@@ -67,9 +67,15 @@ export async function sendOpsPrivate(svc: any, qq: string, text: string): Promis
   for (const bot of svc.ctx.bots as any[]) {
     if (!isOneBotPlatform(bot.platform)) continue
     try {
-      await bot.sendPrivateMsg(target, text)
+      // Koishi 4.x 通用 API：OneBot 适配器把 "private:<qq>" 通道译成 send_private_msg。
+      // Bot 基类没有 sendPrivateMsg（那是 OneBot internal 的方法名），误用会抛 TypeError。
+      await bot.sendMessage(`private:${target}`, text)
       return true
-    } catch { /* 尝试下一个在线账号 */ }
+    } catch (error) {
+      // 失败要可见：通知静默丢失是运维套件的隐蔽故障模式。
+      svc.reportStandalone?.('warn', '私聊发送失败 目标=%s 错误=%s',
+        target, error instanceof Error ? error.message : String(error))
+    }
   }
   return false
 }
