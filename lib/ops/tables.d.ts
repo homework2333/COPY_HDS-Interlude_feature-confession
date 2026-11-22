@@ -33,5 +33,7 @@ export interface AccessRequestRow {
     status: string;
     decidedAt?: Date;
     note: string;
+    /** 好友申请事件携带的 OneBot flag——好友同意/拒绝命令靠它回执 QQ 侧。 */
+    flag?: string;
 }
 export type { HostStatusSnapshot };

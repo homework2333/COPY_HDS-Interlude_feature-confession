@@ -3,10 +3,12 @@ import type { AccessRequestRow } from './tables';
 import type { DailyReportConfig } from './types';
 import type { DailyReportInput, HostStatusSnapshot } from './daily-report';
 import { renderDailyReport } from './daily-report';
+import { type ProviderOffPeakPricing } from '../narrator';
 export declare function dailyReportConfig(svc: any): DailyReportConfig;
 export declare function storyTimezone(svc: any): string;
 export declare function sendOpsPrivate(svc: any, qq: string, text: string): Promise<boolean>;
-/** 按连接价格字段（每百万 token）估算单次调用费用。 */
+/** 按连接价格字段（每百万 token）估算单次调用费用；record.priceOffPeak 启用
+ * 且 now（北京时间）处于错峰窗口时，整体按折扣系数计价。 */
 export declare function estimateTokenCost(record: {
     inputTokens?: number;
     outputTokens?: number;
@@ -14,7 +16,8 @@ export declare function estimateTokenCost(record: {
     priceInput?: number;
     priceOutput?: number;
     priceCachedInput?: number;
-}): number;
+    priceOffPeak?: ProviderOffPeakPricing;
+}, now?: Date): number;
 export declare function persistUsageRecord(svc: any, record: {
     task: string;
     providerLabel: string;
@@ -25,6 +28,7 @@ export declare function persistUsageRecord(svc: any, record: {
     priceInput?: number;
     priceOutput?: number;
     priceCachedInput?: number;
+    priceOffPeak?: ProviderOffPeakPricing;
 }): void;
 export declare function persistOpsLog(svc: any, level: 'error' | 'warn', phase: string, message: string): void;
 export declare function readHostStatusSnapshot(baseDir: string): HostStatusSnapshot | null;
@@ -36,10 +40,13 @@ export declare function runDailyReport(svc: any): Promise<boolean>;
 export declare function scheduleDailyReport(svc: any): void;
 /** 用量表保留 60 天、错误表保留 30 天（与备份保留口径对齐）。 */
 export declare function cleanupOpsTables(svc: any): Promise<void>;
+export declare function notifyManagers(svc: any, text: string): Promise<void>;
 /** 陌生人私聊：记录申请 + 每天一次礼貌回复。返回 true = 已消费该消息。 */
 export declare function noteAccessRequest(svc: any, session: Session): Promise<boolean>;
-/** 好友申请：记录 + 通知管理员（附 flag）。 */
+/** 好友申请：记录（含 flag）+ 通知管理员。同意好友后白名单自动生效。 */
 export declare function noteFriendRequest(svc: any, session: Session): Promise<void>;
+/** 好友同意/拒绝命令：用通知里的 flag 找回对应申请（QQ 号、昵称、验证消息）。 */
+export declare function findAccessRequestByFlag(svc: any, flag: string): Promise<AccessRequestRow | null>;
 export declare function listAccessRequests(svc: any, status?: string): Promise<AccessRequestRow[]>;
 /** 审批落库（配置写入由调用方负责：命令在 index.ts，页面在 console/ops.ts）。 */
 export declare function recordAccessDecision(svc: any, qq: string, approve: boolean, note?: string): Promise<AccessRequestRow | null>;

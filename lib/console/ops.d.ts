@@ -3,7 +3,8 @@
  * - hdsi/ops/recent      调试事件流（环形缓冲最近事件 + 统计；authority=1）
  * - hdsi/lists/read      名单页合并视图（白名单 + 群聊 + 申请 + 参与者状态）
  * - hdsi/lists/save      保存私聊用户/群聊白名单（经配置中心管线持久化）
- * - hdsi/lists/decide    审批白名单申请（approve 时同步写入 onebot.userAccounts）
+ * - hdsi/lists/decide    审批白名单申请（approve 时同步写入 onebot.userAccounts；
+ *                         好友申请行同时回执 QQ 侧同意/拒绝）
  * - hdsi/ops/report      日报预览（authority=3，与 interlude.日报 同源）
  * - hdsi/ops/usage       调用分析：用量汇总/趋势分桶/最近流水（authority=1，30s 轮询）
  *

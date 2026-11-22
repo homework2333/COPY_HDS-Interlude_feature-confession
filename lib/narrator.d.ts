@@ -76,6 +76,8 @@ export interface ProviderConfig {
     priceInput?: number;
     priceOutput?: number;
     priceCachedInput?: number;
+    /** DeepSeek 峰谷价（错峰优惠）：错峰时段内按折扣系数计价。 */
+    priceOffPeak?: ProviderOffPeakPricing;
 }
 export interface FailoverConfig {
     enabled: boolean;
@@ -300,6 +302,19 @@ export declare function extractEarlyNarrativeReply(raw: string, group: boolean):
  * , } ] : 之一或文本结束时视为真结束符;否则判定为散文里的裸引号(模型引用
  * 聊天内容的稳定习惯),补逃生符并留在字符串内。合法 \" 不受影响。 */
 export declare function repairBareQuotes(text: string): string;
+/** DeepSeek 峰谷价（错峰优惠）计价配置。时段固定按北京时间判定——这是
+ * DeepSeek 官方计费口径，与故事时区无关；默认窗口 00:30–08:30 五折。 */
+export interface ProviderOffPeakPricing {
+    enabled?: boolean;
+    /** 错峰时段价格系数（乘在输入/缓存/输出三类单价上）；0.5 = 官方五折。 */
+    discount?: number;
+    /** 错峰时段开始（北京时间 HH:mm）。 */
+    start?: string;
+    /** 错峰时段结束（北京时间 HH:mm）；支持跨午夜写法（如 23:00–08:30）。 */
+    end?: string;
+    /** 周六/周日全时段按错峰价计。 */
+    weekendAllDay?: boolean;
+}
 /** Normalized token accounting for one provider response. `cachedInputTokens`
  * is the provider-reported subset of input tokens served from prefix cache. */
 export interface TokenUsageRecord {
@@ -313,6 +328,8 @@ export interface TokenUsageRecord {
     priceInput?: number;
     priceOutput?: number;
     priceCachedInput?: number;
+    /** DeepSeek 峰谷价配置；随聚合记录透传到日志行与用量落库。 */
+    priceOffPeak?: ProviderOffPeakPricing;
 }
 /** Accepts the OpenAI `usage` shape, DeepSeek's legacy cache fields, or anything
  * providers invent; unknown shapes simply yield an empty record. */
@@ -321,17 +338,27 @@ export declare function parseTokenUsage(usage: unknown): {
     outputTokens?: number;
     cachedInputTokens?: number;
 };
+/** 是否处于 DeepSeek 错峰时段（按北京时间判定，与故事时区无关）。
+ * 窗口左闭右开：00:30 起、08:30 止；start > end 视为跨午夜窗口；
+ * weekendAllDay 时周六/周日全日按错峰计。 */
+export declare function isOffPeakMoment(now: Date, pricing?: ProviderOffPeakPricing): boolean;
+/** 错峰折扣系数：命中错峰窗口返回折扣（默认 0.5 = 官方五折），否则 1；
+ * 折扣夹取到 [0.01, 1]，防止误填放大单价。 */
+export declare function offPeakDiscountMultiplier(pricing: ProviderOffPeakPricing | undefined, now?: Date): number;
 /** Sum usage across attempts (failover/recovery each consume tokens); identity
  * and pricing come from the last record, i.e. the attempt that produced the
  * final answer. */
 export declare function aggregateTokenUsages(records: TokenUsageRecord[]): TokenUsageRecord | undefined;
 /** Billing for one record. Cached tokens are a subset of input tokens and are
- * billed at the cache price; everything else at the plain input price. */
-export declare function computeTokenCost(record: TokenUsageRecord): {
+ * billed at the cache price; everything else at the plain input price. When the
+ * record carries DeepSeek off-peak pricing and the moment (Beijing time) falls
+ * inside the off-peak window, the discount multiplies all three prices. */
+export declare function computeTokenCost(record: TokenUsageRecord, now?: Date): {
     inputCost: number;
     outputCost: number;
     total: number;
     saved: number;
+    offPeak: boolean;
 } | undefined;
 /** One human-readable log line: usage numbers, cache hit rate, and optional
  * billing. Absent fields are simply omitted instead of printed as zero. */

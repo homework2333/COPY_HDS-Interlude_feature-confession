@@ -1,5 +1,10 @@
-import { Context, Schema } from 'koishi';
+import { Context, Schema, Session } from 'koishi';
 import { Config as InterludeConfig, InterludeService } from './service';
+declare module 'koishi' {
+    interface Events {
+        'friend-added'(session: Session): void;
+    }
+}
 export { fetchShare, sanitizeSharePayload, summarizeShare, formatDiffLines, buildConfigPatch, diffSection, storyDefaultsToSettingPatch, normalizeShareCode, SHARE_SECTIONS, runAutoSync, readSyncState, writeSyncState } from './share-sync';
 export type { ShareInfo, ShareSection, SectionDiff, ShareSummaryLines, SyncState, AutoUpdateResult } from './share-sync';
 declare module 'koishi' {
