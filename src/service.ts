@@ -53,6 +53,7 @@ import { reconcileTransportReferences } from './script/authored-actions'
 import { OpsEventBus } from './ops/events'
 import type { OpsConfig } from './ops/types'
 import { estimateTokenCost, persistOpsLog, persistUsageRecord, scheduleDailyReport } from './ops/runtime'
+import { schedulePersonaWeekly } from './ops/persona-report'
 
 export { isBotOnlineStatus } from './session-platform'
 // P1 拆分（2026-10-29）：原文件尾部助手已迁至 session-platform / chat-artifacts / narrative-normalizers，
@@ -1173,6 +1174,8 @@ export class InterludeService extends Service {
     }
     // 运维套件：每日日报定时链（故事时区 hh:mm，默认 0 点）。
     scheduleDailyReport(this)
+    // 人设周报定时链（ops.personaWeekly.enabled 时挂载；故事时区 weekday hh:mm）。
+    schedulePersonaWeekly(this)
     this.reportStandaloneOperation('standard', 'info', '后台调度已启动 剧本扫描=%d分钟 记忆扫描=%d分钟', sweepInterval, this.memoryConfig.backgroundIntervalMinutes)
   }
 

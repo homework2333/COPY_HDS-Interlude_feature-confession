@@ -36,10 +36,25 @@ export interface DebugStreamConfig {
   persistErrors: boolean
 }
 
+/** 人设周报：四指标（口头禅/长度/主动响应/虚构监测）+ 对话抽样。 */
+export interface PersonaWeeklyConfig {
+  enabled: boolean
+  /** 接收人 QQ；留空时取 sharedStory.managerAccounts[0]。 */
+  receiver: string
+  /** 发送日（故事时区，0=周日…6=周六）。 */
+  weekday: number
+  /** 发送时刻（故事时区）。 */
+  hour: number
+  minute: number
+  /** 随报附带的对话轮次抽样条数；0 = 不抽样。 */
+  sampleCount: number
+}
+
 export interface OpsConfig {
   dailyReport?: DailyReportConfig
   accessRequests?: AccessRequestConfig
   debugStream?: DebugStreamConfig
+  personaWeekly?: PersonaWeeklyConfig
 }
 
 export type OpsEventKind = 'log' | 'usage' | 'narrative' | 'access'

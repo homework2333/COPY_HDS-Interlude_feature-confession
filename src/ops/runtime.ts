@@ -56,8 +56,9 @@ function shouldAutoReply(qq: string, dayKey: string): boolean {
 
 /* ── 发送 ─────────────────────────────────────────────────────────── */
 
-/** 内部统一出口：优先 svc.sendOpsPrivate 覆写（测试/桥接注入），否则走真实 bot。 */
-async function deliverPrivate(svc: any, qq: string, text: string): Promise<boolean> {
+/** 内部统一出口：优先 svc.sendOpsPrivate 覆写（测试/桥接注入），否则走真实 bot。
+ * 供日报与人设周报两条定时链共用。 */
+export async function deliverPrivate(svc: any, qq: string, text: string): Promise<boolean> {
   if (typeof svc?.sendOpsPrivate === 'function') return svc.sendOpsPrivate(qq, text)
   return sendOpsPrivate(svc, qq, text)
 }

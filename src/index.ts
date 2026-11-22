@@ -19,6 +19,7 @@ import {
   noteFriendRequest, notifyManagers, recordAccessDecision, renderDailyReport, sendOpsPrivate,
 } from './ops/runtime'
 import { normalizeAccountId } from './platform/identity'
+import { gatherPersonaWeeklyInput, personaWeeklyConfig, renderPersonaWeeklyReport } from './ops/persona-report'
 import { fetchShare, summarizeShare, formatDiffLines, buildConfigPatch, runAutoSync, readSyncState, snapshotDeepCopy } from './share-sync'
 
 // OneBot 适配器把 friend_add 通知转成 session.type="friend-added" 并以此派发事件，
@@ -726,6 +727,14 @@ export const Config: Schema<InterludeConfig> = Schema.object({
       maxEvents: Schema.natural().min(100).max(5_000).default(800).description('事件环形缓冲条数上限。'),
       persistErrors: Schema.boolean().default(true).description('warn 及以上落库（interlude_ops_log），作为日报报错摘要的数据源。'),
     }).collapse(true).description('调试事件流（Console「调试」页）。'),
+    personaWeekly: Schema.object({
+      enabled: Schema.boolean().default(false).description('启用人设周报：每周汇总口头禅重复率、消息长度分布、主动消息响应率与虚构监测命中，附对话抽样私聊发送给接收人。'),
+      receiver: Schema.string().default('').description('接收人 QQ；留空时使用 sharedStory.managerAccounts 第一位。'),
+      weekday: Schema.number().min(0).max(6).default(0).description('发送日（故事时区，0=周日…6=周六）。'),
+      hour: Schema.number().min(0).max(23).default(20).description('发送时刻（时，故事时区）。'),
+      minute: Schema.number().min(0).max(59).default(0).description('发送时刻（分，故事时区）。'),
+      sampleCount: Schema.number().min(0).max(30).default(10).description('随报附带的对话轮次抽样条数；0 = 不抽样。'),
+    }).collapse(true).description('人设周报：四指标 + 对话抽样，配合每周人工审查（interlude.周报 可随时手动生成）。'),
   }).collapse(true).description('【运维 23】运维套件：每日日报、白名单申请与调试事件流。'),
 })
 
@@ -1136,6 +1145,17 @@ function registerCommands(ctx: Context, service: InterludeService, config: Inter
       const input = await gatherDailyReportInput(service, anchor)
       const text = renderDailyReport(input)
       const receiver = dailyReportConfig(service).receiver || String(session?.userId ?? '')
+      const ok = receiver ? await sendOpsPrivate(service, receiver, text) : false
+      return `${text}\n\n${ok ? `（已私聊发送给 ${receiver}）` : '（发送失败或未指定接收人，此处仅预览）'}`
+    })
+
+  ctx.command('interlude.周报', '管理员：生成并发送一份人设周报（四指标 + 对话抽样，覆盖过去 7 个本地日）')
+    .alias('interlude.personaweek')
+    .action(async ({ session }) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const input = await gatherPersonaWeeklyInput(service)
+      const text = renderPersonaWeeklyReport(input)
+      const receiver = personaWeeklyConfig(service).receiver || String(session?.userId ?? '')
       const ok = receiver ? await sendOpsPrivate(service, receiver, text) : false
       return `${text}\n\n${ok ? `（已私聊发送给 ${receiver}）` : '（发送失败或未指定接收人，此处仅预览）'}`
     })
