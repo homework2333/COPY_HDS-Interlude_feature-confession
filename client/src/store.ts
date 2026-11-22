@@ -82,6 +82,26 @@ export const store = {
   async verifyAction(id: string, outcome: 'delivered' | 'not-sent'): Promise<{ ok: boolean, changed: number, reason: string }> {
     return send('hdsi/actions/verify', { id, outcome })
   },
+  /** 运维套件：调试事件流（最近事件 + 统计；authority=1，2s 轮询）。 */
+  async opsRecent(limit = 200): Promise<any> {
+    return send('hdsi/ops/recent', { limit })
+  },
+  /** 名单页合并视图（authority=1）。 */
+  async listsRead(): Promise<any> {
+    return send('hdsi/lists/read')
+  },
+  /** 保存私聊用户/群聊白名单（authority=3，经配置中心管线持久化）。 */
+  async listsSave(payload: { users?: unknown[], groups?: unknown[] }): Promise<{ ok: boolean, error?: string }> {
+    return send('hdsi/lists/save', payload)
+  },
+  /** 审批白名单申请（authority=3）。 */
+  async listsDecide(qq: string, approve: boolean, note?: string): Promise<{ ok: boolean, error?: string }> {
+    return send('hdsi/lists/decide', { qq, approve, note })
+  },
+  /** 日报预览（authority=3）。 */
+  async opsReport(date?: string): Promise<{ ok: boolean, text?: string, error?: string }> {
+    return send('hdsi/ops/report', { date })
+  },
 }
 
 export interface CommunicationActionRowView {

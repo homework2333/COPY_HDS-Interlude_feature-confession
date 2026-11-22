@@ -8,6 +8,8 @@ const PATHS: Record<string, string> = {
   config: 'M4 7.5h7M15 7.5h5M15 4.5v6M4 16.5h3M11 16.5h9M9 13.5v6',
   actions: 'M4 5h16v11H9l-5 4V5zm4 4h8M8 12h5',
   center: 'M4 7h4.5M11.5 7H20M4 17h9.5M16.5 17H20M7.2 4.4v5.2M13.2 14.4v5.2',
+  debug: 'M5 5h14v14H5zM8.5 9h7M8.5 12.5h4.5M8.5 16h6',
+  lists: 'M9 5.5h11M9 12h11M9 18.5h11M4.2 5.5h.01M4.2 12h.01M4.2 18.5h.01',
 }
 
 export default defineComponent({

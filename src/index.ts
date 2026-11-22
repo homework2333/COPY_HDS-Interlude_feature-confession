@@ -13,6 +13,11 @@ import { resolveSchedulePreplanConfig, SchedulePreplanConfig, schedulePreplanWin
 import { formatLogTime, formatStoryDisplayTime } from './time'
 import { installDesktopBridge } from './desktop-bridge'
 import { installHdsiConsole } from './console'
+import { applyConfigSectionPatch } from './console/config-center'
+import {
+  dailyReportConfig, gatherDailyReportInput, listAccessRequests, noteAccessRequest,
+  noteFriendRequest, recordAccessDecision, renderDailyReport, sendOpsPrivate,
+} from './ops/runtime'
 import { fetchShare, summarizeShare, formatDiffLines, buildConfigPatch, runAutoSync, readSyncState, snapshotDeepCopy } from './share-sync'
 export { fetchShare, sanitizeSharePayload, summarizeShare, formatDiffLines, buildConfigPatch, diffSection, storyDefaultsToSettingPatch, normalizeShareCode, SHARE_SECTIONS, runAutoSync, readSyncState, writeSyncState } from './share-sync'
 export type { ShareInfo, ShareSection, SectionDiff, ShareSummaryLines, SyncState, AutoUpdateResult } from './share-sync'
@@ -445,6 +450,7 @@ const OneBotUserAccount: Schema<OneBotAccountRule> = Schema.object({
   profile: Schema.string().role('textarea').default('').description('主角已知的用户背景；仅用于该关系分支。'),
   relationship: Schema.string().role('textarea').default('').description('该用户与主角的初始关系，例如“熟悉但近来联系不多”。'),
   enabled: Schema.boolean().default(true).description('是否接受该账号的私聊并允许向其投递消息。'),
+  proactive: Schema.boolean().default(true).description('是否允许该账号接收主动消息；关闭后仍可正常私聊，但机器人不会主动联系该账号。'),
 }).collapse(true)
 
 const WillingnessTierChoice = Schema.union([
@@ -558,6 +564,15 @@ const SharedStory: Schema<SharedStoryConfig> = Schema.object({
   maxCrossConversationActions: Schema.natural().min(0).max(5).default(1).description('单次主模型回合最多执行的跨账号投递动作。'),
   participantContextLimit: Schema.natural().min(1).max(20).default(6).description('单次请求附带的其它参与者上下文数量。'),
   managerAccounts: Schema.array(Schema.string()).role('table').default([]).description('可执行管理命令的 QQ；留空表示所有已授权用户。'),
+  proactiveContacts: Schema.object({
+    mode: Schema.union([
+      Schema.const('all').description('所有白名单用户都可接收主动消息'),
+      Schema.const('none').description('全部关闭'),
+      Schema.const('blacklist').description('黑名单：名单内的用户不接收主动消息'),
+      Schema.const('whitelist').description('白名单：仅名单内的用户接收主动消息'),
+    ]).default('all').description('主动消息范围模式。'),
+    list: Schema.array(Schema.string()).role('table').default([]).description('名单（QQ 号）：blacklist=不开启的用户；whitelist=开启的用户。'),
+  }).description('主动消息名单策略。'),
 }).collapse(true)
 
 const UrgeAdvanced = Schema.object({
@@ -677,6 +692,27 @@ export const Config: Schema<InterludeConfig> = Schema.object({
   }).collapse(true).description('【扩展 22】实验性·考据 Agent：资料案头为作者供应经核实的写作参考（默认关闭）。'),
   mainPrompt: Schema.string().role('textarea').default('').description('高级写作设置。系统主提示词（主叙事行为指令）：与固定合约、文风和特化块协作，塑造全部回合的写作行为；留空使用内置默认，改动下回合立即生效，出问题清空即可恢复默认。'),
   chatRhythm: ChatRhythm.description('【已弃用】对话节奏：仅兼容旧配置，不再统计、干预写作或重试。').hidden(),
+  ops: Schema.object({
+    dailyReport: Schema.object({
+      enabled: Schema.boolean().default(false).description('启用每日运营日报：按故事时区在设定时刻私聊发送给接收人。'),
+      receiver: Schema.string().default('').description('接收报告的 QQ；留空时使用 sharedStory.managerAccounts 第一位。'),
+      hour: Schema.natural().min(0).max(23).default(0).description('发送时刻（时，故事时区）。'),
+      minute: Schema.natural().min(0).max(59).default(0).description('发送时刻（分，故事时区）。'),
+      includeHostStatus: Schema.boolean().default(true).description('附带宿主机状态段（需在宿主机部署 ops/deploy/host-status.py 采集器；无采集器时自动省略）。'),
+    }).collapse(true).description('每日运营日报：token 用量、报错摘要（按优先级）、健康与宿主机状态。'),
+    accessRequests: Schema.object({
+      enabled: Schema.boolean().default(true).description('启用白名单申请：陌生人私聊或好友申请会记录并通知管理员，管理员授权后自动进入私聊白名单。'),
+      autoReply: Schema.boolean().default(true).description('对陌生人的私聊每天礼貌回复一次（而不是完全静默）。'),
+      replyText: Schema.string().role('textarea').default('').description('礼貌回复的文本；留空使用内置默认。'),
+      notifyManagers: Schema.boolean().default(true).description('新申请出现时私聊通知管理员（附授权/拒绝命令）。'),
+    }).collapse(true).description('白名单申请与审批。'),
+    debugStream: Schema.object({
+      enabled: Schema.boolean().default(true).description('启用调试事件流：Console 调试页实时显示日志、模型用量与主叙事续写。'),
+      scriptPreview: Schema.boolean().default(true).description('把主叙事剧本文本推入事件流（含剧情与私聊内容，Console 已有登录门控，请自行斟酌）。'),
+      maxEvents: Schema.natural().min(100).max(5_000).default(800).description('事件环形缓冲条数上限。'),
+      persistErrors: Schema.boolean().default(true).description('warn 及以上落库（interlude_ops_log），作为日报报错摘要的数据源。'),
+    }).collapse(true).description('调试事件流（Console「调试」页）。'),
+  }).collapse(true).description('【运维 23】运维套件：每日日报、白名单申请与调试事件流。'),
 })
 
 /** F7：启动时一次性迁移历史 off+enabled 群规则（归一为 custom）并持久化
@@ -755,9 +791,27 @@ export function apply(ctx: Context, config: InterludeConfig) {
       const consumed = await service.receiveGroup(session)
       return consumed ? undefined : next()
     }
+    // 白名单申请：未授权用户的私聊在进入叙事前拦截——记录申请、礼貌回复、
+    // 通知管理员（AstrBot whitelistpro + friend_manager 的移植）。命令消息
+    // 照常放行给命令层，让拒绝话术带可操作指引。
+    if (config.runtime.captureDirectMessages
+      && !looksLikeInterludeCommand(session.content)
+      && !service.canHandleSession(session)) {
+      try {
+        const handled = await noteAccessRequest(service, session)
+        if (handled) return undefined
+      } catch (error) {
+        startupLogger.warn('白名单申请记录失败（消息按原流程处理）:%s', (error as Error).message)
+      }
+    }
     if (!config.runtime.captureDirectMessages) return next()
     const consumed = await service.receive(session)
     return consumed ? undefined : next()
+  })
+  // 好友申请：通知管理员（附 flag），由 interlude.好友同意/拒绝 处理。
+  ctx.on('friend-request', session => {
+    void noteFriendRequest(service, session).catch(error =>
+      startupLogger.warn('好友申请通知失败:%s', (error as Error).message))
   })
   if (!blindModeEnabled) startupLogger.info('plugin load completed')
 }
@@ -919,6 +973,132 @@ function registerCommands(ctx: Context, service: InterludeService, config: Inter
 
   ctx.command('interlude.research.status', '查看考据 Agent 状态：开关、搜索后端、案头与考据模型')
     .action(() => service.researchStatusLines().join('\n'))
+
+  /* ── 运维套件：白名单审批 / 日报 / 服务器状态（AstrBot 插件移植） ── */
+
+  const qqArgError = (qq: string) => !/^\d{5,12}$/.test(qq.trim()) ? '请提供有效的 QQ 号（5-12 位数字）。' : ''
+
+  ctx.command('interlude.授权 <qq:string> [note:text]', '管理员：授权一个 QQ 进入私聊白名单（自动写入 Console 配置并落审批记录）')
+    .alias('interlude.authorize')
+    .action(async ({ session }, qq, note) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const error = qqArgError(String(qq ?? ''))
+      if (error) return error
+      const target = String(qq).trim()
+      if (!config.onebot?.enabled) return '当前未启用 OneBot 白名单（onebot.enabled=false），所有私聊本就放行。'
+      const accounts = config.onebot.userAccounts ?? []
+      if (accounts.some(account => String(account.qq).trim() === target)) {
+        await recordAccessDecision(service, target, true, note ?? '')
+        return `${target} 已在私聊白名单中（申请记录已更新）。`
+      }
+      const result = applyConfigSectionPatch(service, Config, 'onebot', {
+        userAccounts: [...accounts, { qq: target, label: (note ?? '').slice(0, 64), enabled: true }],
+      })
+      if (!result.ok) return `写入白名单失败：${result.error}`
+      await recordAccessDecision(service, target, true, note ?? '')
+      ctx.logger('hds-interlude').info('白名单授权 目标=%s 操作人=%s', target, session?.userId ?? 'console')
+      return [
+        `已授权 ${target} 进入私聊白名单。`,
+        '该用户下次私聊时会自动加入共享主剧本（autoEnrollParticipants 默认开启）。',
+        '如需调整称呼/资料，可在 Console「名单」页或 onebot.userAccounts 中编辑。',
+      ].join('\n')
+    })
+
+  ctx.command('interlude.拒绝 <qq:string> [note:text]', '管理员：拒绝一条白名单申请（保留记录，不再提醒）')
+    .alias('interlude.deny')
+    .action(async ({ session }, qq, note) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const error = qqArgError(String(qq ?? ''))
+      if (error) return error
+      const target = String(qq).trim()
+      const row = await recordAccessDecision(service, target, false, note ?? '')
+      if (!row) return '记录失败：数据库写入异常。'
+      return `已拒绝 ${target} 的申请（历史申请 ${row.attempts ?? 0} 次）。再次私聊仍会记录，但不再重复通知。`
+    })
+
+  ctx.command('interlude.申请列表 [status:string]', '管理员：查看白名单申请（默认 pending，可选 all/approved/rejected）')
+    .alias('interlude.requests')
+    .action(async ({ session }, status) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const filter = ['all', 'approved', 'rejected'].includes(String(status)) ? String(status) : 'pending'
+      const rows = await listAccessRequests(service, filter === 'all' ? undefined : filter)
+      if (!rows.length) return `没有${filter === 'pending' ? '待审批' : filter === 'all' ? '' : filter === 'approved' ? '已通过' : '已拒绝'}的申请。`
+      return `白名单申请（${filter}，${rows.length} 条）：\n` + rows.slice(0, 20).map(row =>
+        `· ${row.qq} ${row.displayName ? `「${row.displayName}」` : ''} 来源=${row.source} 尝试=${row.attempts ?? 0} 最近=${formatDateTime(row.lastRequestAt)}${row.note ? ` 备注=${row.note.slice(0, 40)}` : ''}`,
+      ).join('\n')
+    })
+
+  ctx.command('interlude.好友同意 <flag:string>', '管理员：同意一条好友申请（flag 来自申请通知）')
+    .alias('interlude.friend.accept')
+    .action(async ({ session }, flag) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const target = String(flag ?? '').trim()
+      if (!target) return '请提供申请通知里的 flag。'
+      for (const bot of ctx.bots) {
+        if (bot.platform !== 'onebot') continue
+        try {
+          await bot.handleFriendRequest(target, true)
+          return `已同意好友申请（flag=${target.slice(0, 16)}…）。记得用 interlude.授权 <QQ> 把对方加进白名单。`
+        } catch { /* 尝试下一个在线账号 */ }
+      }
+      return '操作失败：没有可用的 OneBot 账号，或 flag 已过期。'
+    })
+
+  ctx.command('interlude.好友拒绝 <flag:string>', '管理员：拒绝一条好友申请')
+    .alias('interlude.friend.reject')
+    .action(async ({ session }, flag) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const target = String(flag ?? '').trim()
+      if (!target) return '请提供申请通知里的 flag。'
+      for (const bot of ctx.bots) {
+        if (bot.platform !== 'onebot') continue
+        try {
+          await bot.handleFriendRequest(target, false)
+          return '已拒绝好友申请。'
+        } catch { /* 尝试下一个在线账号 */ }
+      }
+      return '操作失败：没有可用的 OneBot 账号，或 flag 已过期。'
+    })
+
+  ctx.command('interlude.日报 [date:string]', '管理员：生成并发送一份运营日报（date 形如 2026-11-21，默认刚结束的这一天）')
+    .alias('interlude.report')
+    .action(async ({ session }, date) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      let anchor: Date | undefined
+      if (date && /^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+        anchor = new Date(`${String(date).trim()}T12:00:00`)
+        if (Number.isNaN(anchor.getTime())) anchor = undefined
+      }
+      const input = await gatherDailyReportInput(service, anchor)
+      const text = renderDailyReport(input)
+      const receiver = dailyReportConfig(service).receiver || String(session?.userId ?? '')
+      const ok = receiver ? await sendOpsPrivate(service, receiver, text) : false
+      return `${text}\n\n${ok ? `（已私聊发送给 ${receiver}）` : '（发送失败或未指定接收人，此处仅预览）'}`
+    })
+
+  ctx.command('interlude.服务器状态', '管理员：查看 HDSI 运行状态与宿主机资源（复刻 /状态）')
+    .alias('interlude.serverstatus')
+    .action(async ({ session }) => {
+      if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
+      const [input, pending] = await Promise.all([
+        gatherDailyReportInput(service, new Date()),
+        listAccessRequests(service, 'pending'),
+      ])
+      const host = input.hostStatus
+      const lines = [
+        `🖥 HDSI 服务器状态 · v${input.version}`,
+        `⏱ 运行 ${Math.floor(input.uptimeSeconds / 60)} 分钟 · 待审批申请 ${pending.length} 条`,
+      ]
+      if (host) {
+        lines.push(`⚙️ CPU ${host.cpu_pct}% · ${host.cores} 核 · 负载 ${host.load?.[0] ?? '?'}`)
+        lines.push(`🧠 内存 ${host.mem.total_mb - host.mem.avail_mb}/${host.mem.total_mb}M · ${host.mem.pct}%`)
+        lines.push(`💽 磁盘 ${host.disk.used_gb}/${host.disk.total_gb}G · ${host.disk.pct}%`)
+        for (const box of host.containers ?? []) lines.push(`📦 ${box.name} ${box.mem} · ${box.cpu}`)
+      } else {
+        lines.push('（宿主机采集器未部署：ops/deploy/host-status.py）')
+      }
+      return lines.join('\n')
+    })
 
   ctx.command('interlude.status', '查看当前故事、游标、主模型连接与主动消息开关')
     .action(async ({ session }) => {

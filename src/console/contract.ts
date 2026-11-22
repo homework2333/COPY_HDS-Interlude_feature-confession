@@ -98,6 +98,7 @@ export const CONFIG_CENTER_MENU: ConfigCenterGroupMeta[] = [
     { id: 'longHorizon', label: '长线叙事催化器', description: '潜在张力与首次微表达许可（实验）。', stage: 1 },
     { id: 'qzone', label: 'QQ 空间', description: '说说/评论/点赞通道（需 SnowLuma）。', stage: 1 },
     { id: 'research', label: '考据 Agent', description: '资料案头：经核实的写作参考（实验）。', stage: 1 },
+    { id: 'ops', label: '运维套件', description: '每日日报、白名单申请审批与调试事件流。', stage: 1 },
   ] },
   { id: 'maintenance', label: '维护与诊断', sections: [
     { id: 'blindMode', label: '盲区模式', description: '稳定运行后关闭管理命令与运行日志，保留低频健康心跳。', stage: 1 },

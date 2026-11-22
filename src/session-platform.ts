@@ -513,3 +513,33 @@ export function isEnabledAccount(accounts: OneBotAccountRule[] | undefined, qq: 
   if (!normalized) return false
   return (accounts ?? []).some(account => account.enabled !== false && normalizeAccountId(account.qq) === normalized)
 }
+
+/* ── 按用户主动消息策略（原发行包补丁 v2 的源码化）──────────────────
+ * 关闭集合 = 显式 proactive=false 的启用账号 ∪ 名单策略排除者。
+ * mode=all（默认）只应用按账号开关；none/blacklist/whitelist 在其上叠加。 */
+export function resolveProactiveOffUsers(config: {
+  onebot?: { userAccounts?: OneBotAccountRule[] }
+  sharedStory?: { proactiveContacts?: { mode?: string, list?: unknown } }
+}): Set<string> {
+  const off = new Set<string>()
+  const accounts = config.onebot?.userAccounts ?? []
+  const enabledUsers: string[] = []
+  for (const account of accounts) {
+    if (!account || account.enabled === false) continue
+    const qq = normalizeAccountId(account.qq)
+    if (!qq) continue
+    enabledUsers.push(qq)
+    if (account.proactive === false) off.add(qq)
+  }
+  const policy = config.sharedStory?.proactiveContacts
+  const mode = typeof policy?.mode === 'string' ? policy.mode : 'all'
+  const list = (Array.isArray(policy?.list) ? policy.list : []).map(value => normalizeAccountId(String(value))).filter(Boolean)
+  if (mode === 'none') {
+    for (const qq of enabledUsers) off.add(qq)
+  } else if (mode === 'blacklist') {
+    for (const qq of list) off.add(qq)
+  } else if (mode === 'whitelist') {
+    for (const qq of enabledUsers) if (!list.includes(qq)) off.add(qq)
+  }
+  return off
+}

@@ -50,11 +50,14 @@ import { groundedEpisodeTags } from './script/episode-index'
 import { recallFocus } from './script/recall-navigation'
 import { developmentContextQuery } from './script/development'
 import { reconcileTransportReferences } from './script/authored-actions'
+import { OpsEventBus } from './ops/events'
+import type { OpsConfig } from './ops/types'
+import { estimateTokenCost, persistOpsLog, persistUsageRecord, scheduleDailyReport } from './ops/runtime'
 
 export { isBotOnlineStatus } from './session-platform'
 // P1 拆分（2026-10-29）：原文件尾部助手已迁至 session-platform / chat-artifacts / narrative-normalizers，
 // 此处保留 re-export 垫片（既有测试与外部导入不变）并 import 类内部使用的助手。行为不变。
-import { isBotOnlineStatus, bindActiveServiceForEndpoints, storyIdForCharacter, legacyStoryIdFor, participantIdFor, participantIdForStory, sameParticipantEndpoint, isOneBotPlatform, sessionGroupId, groupIdStorageVariants, normalizeGroupId, samePlatformFamily, normalizeAccountId } from './session-platform'
+import { isBotOnlineStatus, bindActiveServiceForEndpoints, storyIdForCharacter, legacyStoryIdFor, participantIdFor, participantIdForStory, sameParticipantEndpoint, isOneBotPlatform, sessionGroupId, groupIdStorageVariants, normalizeGroupId, samePlatformFamily, normalizeAccountId, resolveProactiveOffUsers } from './session-platform'
 export { extractSessionVoiceCount, extractSessionAudioSources, SessionFileFact, extractSessionFileFacts, describeGroupAttachments, withTransportTimeout, guessAudioFormat } from './session-platform'
 import { normalizeExpressionThreshold, targetableMessageId, groupMessageRef, extractUserReportedTimes, normalizeQuotedMessageContext, normalizeTimelinePlan, describeTimelinePlanRejection, timelineEntryPromptProjection, formatGroupSpeaker } from './chat-artifacts'
 export { calibratedNativeFaceWillingness, stableStickerAssetId, stickerDeliveryUrl, stickerFileUrl, extractUserReportedTimes, describeQuotedMessage, normalizeQuotedMessageContent, normalizeAllowedReactions, normalizeTimelinePlan, describeTimelinePlanRejection, timelineEntryPromptProjection, normalizeGroupChatActions, formatGroupSpeaker } from './chat-artifacts'
@@ -351,6 +354,8 @@ export interface Config {
   schedulePreplan?: SchedulePreplanConfig
   /** 实验性：主叙事微调数据采集（原始输入/输出 JSONL）；盲模式下强制关闭。 */
   modelCapture?: ModelCaptureConfig
+  /** 运维套件：日报、白名单申请、调试事件流。 */
+  ops?: OpsConfig
   /** 实验性：考据 Agent——资料案头为作者供应经核实的写作参考。 */
   research?: ResearchConfig
 }
@@ -371,6 +376,9 @@ export interface OneBotAccountRule {
   personId?: string
   profile?: string
   relationship?: string
+  /** Per-account proactive switch: false keeps normal DMs but the character
+   * never initiates contact with this account. Absent means allowed. */
+  proactive?: boolean
 }
 
 export interface OneBotNapCatConfig {
@@ -608,6 +616,13 @@ export interface ParticipantPreset {
   enabled: boolean
 }
 
+/** Who may receive proactive messages. Layered on top of the global
+ * runtime.allowProactiveMessages switch and per-account opt-outs. */
+export interface ProactiveContactsPolicy {
+  mode: 'all' | 'none' | 'blacklist' | 'whitelist'
+  list: string[]
+}
+
 export interface SharedStoryConfig {
   /** One main story per bot account. Kept configurable for a safe rollback. */
   enabled?: boolean
@@ -623,6 +638,8 @@ export interface SharedStoryConfig {
   participantContextLimit: number
   /** Empty keeps legacy behaviour; otherwise only these QQs may run global management commands. */
   managerAccounts: string[]
+  /** Scope policy for proactive messages (per-user opt-out plus mode/list). */
+  proactiveContacts?: ProactiveContactsPolicy
   /** Optional QQ-to-person presets; accounts with the same personId share identity notes. */
   /** @deprecated Use onebot.userAccounts identity fields in new configs. */
   participantPresets?: ParticipantPreset[]
@@ -866,6 +883,14 @@ export class InterludeService extends Service {
   private cachedModelCaptureConfig?: ModelCaptureConfig
   /** P3: Console 健康面板的内存滚动指标（重载后归零）。 */
   readonly health = new HealthMonitor()
+  /** 运维事件总线（调试页实时流的数据源）。容量取 ops.debugStream.maxEvents。 */
+  opsBus: OpsEventBus = new OpsEventBus(800)
+  /** 进程启动时刻（日报的运行时长来源）。 */
+  readonly bootedAt = Date.now()
+
+  get opsConfig(): OpsConfig {
+    return ((this.config as any).ops ?? {}) as OpsConfig
+  }
   /** Token 用量到达时可能尚未有 canonical story——用最近活跃的 storyId 记账。
    * P3 Fix: constructor 末尾初始化为当前 canonical story，减少首轮漏记。 */
   private lastActiveStoryId?: string
@@ -1145,6 +1170,8 @@ export class InterludeService extends Service {
       this.ctx.setTimeout(() => void this.runStickerHarvestScan(), 15_000)
       this.ctx.setInterval(() => void this.runStickerHarvestScan(), this.harvestConfig.scanIntervalMinutes * Time.minute)
     }
+    // 运维套件：每日日报定时链（故事时区 hh:mm，默认 0 点）。
+    scheduleDailyReport(this)
     this.reportStandaloneOperation('standard', 'info', '后台调度已启动 剧本扫描=%d分钟 记忆扫描=%d分钟', sweepInterval, this.memoryConfig.backgroundIntervalMinutes)
   }
 
@@ -4449,12 +4476,36 @@ export class InterludeService extends Service {
     }
     const allParticipants = await this.participants(story.id)
     const permittedParticipantIds = new Set(allParticipants.filter(item => this.canHandleParticipant(item)).map(item => item.id))
+    // 按用户主动消息策略：只在非“用户消息/对话跟进”相位剔除被关闭的用户，
+    // 正在进行的对话不受影响（两阶段豁免，与发行包补丁 v2 行为一致）。
+    if (phase !== 'user-message' && phase !== 'conversation-follow-up') {
+      const proactiveOff = resolveProactiveOffUsers(this.config)
+      if (proactiveOff.size) {
+        const currentParticipantId = participant?.id ?? ''
+        for (const item of allParticipants) {
+          if (item.userId && proactiveOff.has(normalizeAccountId(item.userId)) && item.id !== currentParticipantId) {
+            permittedParticipantIds.delete(item.id)
+          }
+        }
+      }
+    }
     const permittedGroupIds = new Set(activeProactiveGroupTargets(this.config.onebot?.groupChats ?? []).map(({ groupId }) => groupId))
     const refreshContinuity = this.shouldRefreshContinuity(story, phase)
     let decision = normalizeDecision(
       raw, from, now, permitMessages, this.effectiveUrgeRuntime, this.sharedStoryConfig,
       participant?.id ?? '', permittedParticipantIds, permittedGroupIds, phase, this.memoryConfig, refreshContinuity,
     )
+    // 调试事件流：主叙事续写完成即推送（文本受 ops.debugStream.scriptPreview 门控）。
+    if (this.opsConfig.debugStream?.enabled !== false) {
+      const interaction = decision.interaction
+      const decisionSummary = !interaction ? '（无交互决定）'
+        : `${interaction.seen ? '已读' : '未读'} · 回复=${interaction.reply?.mode ?? 'none'}`
+      this.opsBus.publish({
+        kind: 'narrative', phase, storyId: story.id,
+        script: this.opsConfig.debugStream?.scriptPreview === false ? '' : String(decision.script ?? '').slice(0, 4_000),
+        decision: decisionSummary,
+      })
+    }
     const stateBefore = decodeStoryState(story.state)
     const activeScene = decision.script ? await this.activeScene(story.id) : null
     const sceneFrame: SceneFrame | undefined = decision.script
@@ -7229,6 +7280,7 @@ export class InterludeService extends Service {
     // 直接抛 TypeError，且发生在叙事管线关键路径上会造成死锁。防御式回退到
     // 故事 ID，日志层永不成为故障源。
     const protagonist = story.setting?.character?.name ?? story.id
+    this.opsPublishLog(level, phaseLabel(phase), protagonist, rendered)
     const communicationAction = communication
       ? communication.domain === 'policy' ? 'warning' as const
         : communication.domain === 'transport' ? 'send' as const
@@ -7262,6 +7314,16 @@ export class InterludeService extends Service {
    * optional billing from the per-connection price fields. */
   private reportTokenUsage(record: TokenUsageRecord) {
     this.desktopEventSink?.('token', record)
+    if (this.opsConfig.debugStream?.enabled !== false) {
+      this.opsBus.publish({
+        kind: 'usage',
+        task: String(record.task ?? 'unknown'), providerLabel: record.providerLabel ?? '', model: record.model ?? '',
+        inputTokens: record.inputTokens ?? 0, outputTokens: record.outputTokens ?? 0,
+        cachedInputTokens: record.cachedInputTokens ?? 0,
+        cost: estimateTokenCost(record),
+      })
+    }
+    persistUsageRecord(this, record)
     const line = formatTokenUsageLine(record)
     if (!line) return
     // token 行并入 standard verbosity（此前不受门控，高频热路径放大日志量）。
@@ -7281,6 +7343,7 @@ export class InterludeService extends Service {
     const rank = { silent: 0, error: 1, warn: 2, info: 3, debug: 4 }
     const logging = this.config.logging ?? { level: 'info' as const, format: 'layered' as const, colors: true, colorTheme: 'dark' as const, kaomoji: true }
     if (rank[logging.level] < rank[level]) return
+    this.opsPublishLog(level, 'system', 'HDSI', renderLogMessage(message, args))
     const output = logging.format === 'layered'
       ? formatLayeredLog({
         level, protagonist: 'HDSI', message, args, standalone: true,
@@ -7309,8 +7372,15 @@ export class InterludeService extends Service {
     await this.dbSet('interlude_story', { id: storyId }, { state: encodeStoryState({ ...state, continuityDirty: true }), updatedAt: now })
   }
 
-  private emitLog(level: 'error' | 'warn' | 'info' | 'debug', output: string) {
-    if (level === 'error') this.serviceLogger.error(output)
+  /** 运维事件流：与 emitLog 同源的日志进入调试总线；warn/error 额外落库。
+   * 注意：盲模式下 writeReport/writeStandalone 提前返回，事件流同样静默。 */
+  private opsPublishLog(level: 'error' | 'warn' | 'info' | 'debug', phase: string, protagonist: string, message: string) {
+    if (this.opsConfig.debugStream?.enabled === false) return
+    this.opsBus.publish({ kind: 'log', level, message, phase, protagonist })
+    if (level === 'error' || level === 'warn') persistOpsLog(this, level, phase, message)
+  }
+
+  private emitLog(level: 'error' | 'warn' | 'info' | 'debug', output: string) {    if (level === 'error') this.serviceLogger.error(output)
     else if (level === 'warn') this.serviceLogger.warn(output)
     else if (level === 'info') this.serviceLogger.info(output)
     else this.serviceLogger.debug(output)

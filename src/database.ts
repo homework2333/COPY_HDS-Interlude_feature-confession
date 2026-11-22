@@ -7,6 +7,7 @@ import type { QzonePostRecord } from './qzone'
 import type { EndpointRow, EndpointStateRecord, StoryAliasRecord } from './endpoints'
 import type { WorkRow } from './works'
 import type { LongArcGuidanceRow, LongArcProgressRow } from './long-arc'
+import type { AccessRequestRow, OpsLogRow, UsageLogRow } from './ops/tables'
 
 declare module 'koishi' {
   interface Tables {
@@ -31,6 +32,9 @@ declare module 'koishi' {
     interlude_long_arc_progress: LongArcProgressRow
     interlude_story_alias: StoryAliasRecord
     interlude_work: WorkRow
+    interlude_usage_log: UsageLogRow
+    interlude_ops_log: OpsLogRow
+    interlude_access_request: AccessRequestRow
   }
 }
 
@@ -69,6 +73,7 @@ export function registerTables(ctx: Context) {
     if (!existingTables.interlude_work) registerWorkTable(ctx)
     if (!existingTables.interlude_long_arc_guidance) registerLongArcGuidanceTable(ctx)
     if (!existingTables.interlude_long_arc_progress) registerLongArcProgressTable(ctx)
+    registerOpsTables(ctx)
     return
   }
 
@@ -149,6 +154,7 @@ export function registerTables(ctx: Context) {
   registerWorkTable(ctx)
   registerLongArcGuidanceTable(ctx)
   registerLongArcProgressTable(ctx)
+  registerOpsTables(ctx)
 }
 
 function registerScriptEntryEmbedding(ctx: Context, tables = (ctx.model as any).tables ?? {}) {
@@ -279,4 +285,24 @@ function registerWorkTable(ctx: Context) {
   ctx.model.extend('interlude_work', {
     id: 'string(64)', storyId: 'string(255)', participantId: 'string(255)', generation: 'unsigned', state: 'json',
   }, { primary: 'id' })
+}
+
+function registerOpsTables(ctx: Context) {
+  if ((ctx.model as any).tables?.interlude_usage_log) return
+  // 运维套件（ops）：模型用量落库（日报数据源，保留 60 天）。
+  ctx.model.extend('interlude_usage_log', {
+    id: 'unsigned', ts: 'timestamp', task: 'string(63)', providerLabel: 'string(127)',
+    model: 'string(127)', inputTokens: 'unsigned', outputTokens: 'unsigned',
+    cachedInputTokens: 'unsigned', cost: 'double',
+  }, { primary: 'id', autoInc: true, indexes: ['ts', 'task'] })
+  // 运维套件（ops）：warn/error 落库（日报报错摘要数据源，保留 30 天）。
+  ctx.model.extend('interlude_ops_log', {
+    id: 'unsigned', ts: 'timestamp', level: 'string(16)', phase: 'string(63)', message: 'text',
+  }, { primary: 'id', autoInc: true, indexes: ['ts', 'level'] })
+  // 运维套件（ops）：白名单申请（陌生人私聊/好友申请 → 管理员审批）。
+  ctx.model.extend('interlude_access_request', {
+    id: 'unsigned', qq: 'string(63)', displayName: 'string(255)', source: 'string(32)',
+    firstRequestAt: 'timestamp', lastRequestAt: 'timestamp', attempts: 'unsigned',
+    status: 'string(16)', decidedAt: 'timestamp', note: 'text',
+  }, { primary: 'id', autoInc: true, indexes: ['qq', 'status'] })
 }

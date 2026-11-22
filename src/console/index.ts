@@ -10,6 +10,7 @@ import type { InterludeService } from '../service'
 import { installConfigRpc } from './rpc'
 import { installConfigCenterRpc } from './config-center'
 import { installActionsRpc } from './actions'
+import { installOpsRpc } from './ops'
 
 /** 快照形状（客户端与服务端共享的唯一契约）。 */
 export interface HdsiOverview {
@@ -87,6 +88,7 @@ export function installHdsiConsole(ctx: Context, host: InterludeService, configS
   installConfigRpc(ctx, host, configSchema)
   installConfigCenterRpc(ctx, host, configSchema)
   installActionsRpc(ctx, host)
+  installOpsRpc(ctx, host, configSchema)
   try {
     // Bundled (lib/index.js → ../client-dist/) and dev-from-source
     // (src/console/index.ts → ../../client-dist/) differ in depth.
