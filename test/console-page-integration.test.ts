@@ -19,12 +19,14 @@ const root = resolve('.')
 const req = createRequire(resolve('package.json'))
 const state: any = { route: vue.reactive({ params: { page: 'overview' } }) }
 ;(globalThis as any).__HDSI_CONSOLE_RENDER_TEST__ = state
-let vite: any, Center: any, Shell: any, FormPlugin: any
+let vite: any, Center: any, Shell: any, FormPlugin: any, Usage: any
 before(async () => {
   const { createServer } = await import('vite')
   const { default: pluginVue } = await import('@vitejs/plugin-vue')
   const { default: yaml } = await import('@maikolib/vite-plugin-yaml')
-  const vuePlugin: any = pluginVue()
+  // 自定义内存渲染器未实现 insertStaticContent，关闭静态提升让大段静态
+  // 模板（调用分析页的表头/卡片）走普通 vnode 路径。仅影响本测试的编译。
+  const vuePlugin: any = pluginVue({ template: { compilerOptions: { hoistStatic: false } } })
   const transform = typeof vuePlugin.transform === 'function' ? vuePlugin.transform : vuePlugin.transform.handler
   vuePlugin.transform = function (code: string, id: string, options: any) {
     return transform.call(this, code, id, { ...options, ssr: false })
@@ -50,6 +52,7 @@ before(async () => {
   FormPlugin = (await vite.ssrLoadModule(form)).default
   Center = (await vite.ssrLoadModule('/client/src/pages/ConfigCenterPage.vue')).default
   Shell = (await vite.ssrLoadModule('/client/src/HdsiApp.vue')).default
+  Usage = (await vite.ssrLoadModule('/client/src/pages/UsagePage.vue')).default
 })
 after(async () => { await vite?.close(); delete (globalThis as any).__HDSI_CONSOLE_RENDER_TEST__ })
 
@@ -259,4 +262,67 @@ test('configuration menu RPC tolerates null produced by real Console JSON transp
   assert.equal(responses[0].body.value.ok, true)
   assert.equal(responses[0].body.value.menu.flatMap((group: any) => group.sections).length, 26)
   assert.equal(responses[0].body.value.schema, undefined)
+})
+
+test('usage RPC is registered read-only and returns bucketed analytics through the real Console client', async () => {
+  const rows = [
+    { id: 2, ts: new Date('2026-11-22T06:20:00Z'), task: '主叙事', providerLabel: 'p', model: 'deepseek-flash', inputTokens: 200, outputTokens: 20, cachedInputTokens: 100, cost: 0.02 },
+    { id: 1, ts: new Date('2026-11-22T06:10:00Z'), task: '压缩', providerLabel: 'p', model: 'deepseek-flash', inputTokens: 100, outputTokens: 10, cachedInputTokens: 0, cost: 0.01 },
+  ]
+  const host: any = {
+    config: Config({}),
+    opsBus: { recent: () => [], snapshot: () => ({}) },
+    dbGet: async (table: string, query: any) => table === 'interlude_usage_log' && query?.ts?.$gte ? rows : [],
+  }
+  const consoleHost: any = { listeners: {}, addEntry() {}, addListener(event: string, callback: any, options: any) { this.listeners[event] = { callback, ...options } } }
+  const ctx: any = { console: consoleHost, plugin() {}, logger: () => ({ warn() {} }), on() {}, get: () => consoleHost, serial: async () => false, root: { [Context.internal]: {} } }
+  installHdsiConsole(ctx, host, Config)
+  assert.equal(consoleHost.listeners['hdsi/ops/usage']?.authority, 1)
+  const responses: any[] = []
+  const client = new Client(ctx, { addEventListener() {}, send: (value: string) => responses.push(JSON.parse(value)) } as any)
+  await client.receive({ data: JSON.stringify({ id: 'u1', type: 'hdsi/ops/usage', args: [{ preset: 'today' }] }) } as any)
+  const value = responses[0].body.value
+  assert.equal(value.ok, true)
+  assert.equal(value.bucketMode, 'hour')
+  assert.equal(value.buckets.length, 24)
+  assert.equal(value.totals.calls, 2)
+  assert.deepEqual(value.recent.map((item: any) => item.id), [2, 1])
+})
+
+test('usage page renders totals, buckets and recent rows from the analytics RPC', async () => {
+  const original = state.send
+  state.send = async (event: string, input?: any) => {
+    if (event === 'hdsi/ops/usage') {
+      assert.equal(input.preset, 'today')
+      return {
+        ok: true, preset: 'today', range: { from: 0, to: 0 }, bucketMode: 'hour',
+        totals: { calls: 2, inputTokens: 300, outputTokens: 30, cachedInputTokens: 100, cost: 0.03 },
+        byTask: [
+          { task: '主叙事', model: 'deepseek-flash', calls: 1, inputTokens: 200, outputTokens: 20, cachedInputTokens: 100, cost: 0.02 },
+          { task: '压缩', model: 'deepseek-flash', calls: 1, inputTokens: 100, outputTokens: 10, cachedInputTokens: 0, cost: 0.01 },
+        ],
+        buckets: Array.from({ length: 24 }, (_, index) => ({ label: `${String(index).padStart(2, '0')}:00`, calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, cost: 0 })),
+        recent: [
+          { id: 2, ts: Date.parse('2026-11-22T06:20:00Z'), task: '主叙事', model: 'deepseek-flash', inputTokens: 200, outputTokens: 20, cachedInputTokens: 100, cost: 0.02 },
+        ],
+      }
+    }
+    return original(event, input)
+  }
+  const view = mount(Usage)
+  try {
+    await until(() => text(view.tree).includes('缓存命中率'))
+    assert.deepEqual(view.errors, [])
+    const output = text(view.tree)
+    assert.ok(output.includes('调用分析'))
+    assert.ok(output.includes('33%')) // 100/300 命中率
+    assert.ok(output.includes('主叙事'))
+    assert.ok(output.includes('0.0300') || output.includes('0.03')) // 费用卡
+    // 趋势柱与明细行确实渲染（24 格小时轴 + 最近流水里的模型名）。
+    assert.ok(all(view.tree).some(el => String(el.props.class ?? '').split(' ').includes('chart')))
+    assert.ok(all(view.tree).some(el => text(el).includes('deepseek-flash')))
+  } finally {
+    view.unmount()
+    state.send = original
+  }
 })

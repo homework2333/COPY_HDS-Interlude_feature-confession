@@ -36,7 +36,7 @@ export function dailyReportConfig(svc: any): DailyReportConfig {
   }
 }
 
-function storyTimezone(svc: any) {
+export function storyTimezone(svc: any) {
   return (svc.config?.storyDefaults?.timezone as string) || 'Asia/Shanghai'
 }
 

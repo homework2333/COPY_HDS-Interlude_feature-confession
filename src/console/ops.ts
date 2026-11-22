@@ -5,6 +5,7 @@
  * - hdsi/lists/save      保存私聊用户/群聊白名单（经配置中心管线持久化）
  * - hdsi/lists/decide    审批白名单申请（approve 时同步写入 onebot.userAccounts）
  * - hdsi/ops/report      日报预览（authority=3，与 interlude.日报 同源）
+ * - hdsi/ops/usage       调用分析：用量汇总/趋势分桶/最近流水（authority=1，30s 轮询）
  *
  * 调试页刷新采用轮询（客户端 2s 拉 hdsi/ops/recent）：本版 @koishijs/plugin-console
  * 无通用 broadcast 通道，DataService 全量推送在事件密集时开销过大。
@@ -14,6 +15,7 @@ import type { InterludeService } from '../service'
 import { applyConfigSectionPatch } from './config-center'
 import type { AccessRequestRow } from '../ops/tables'
 import { listAccessRequests, recordAccessDecision, gatherDailyReportInput, renderDailyReport } from '../ops/runtime'
+import { gatherUsageAnalytics, type UsageAnalyticsResult, type UsagePreset } from '../ops/usage-analytics'
 import type { OpsEvent, OpsStreamStats } from '../ops/types'
 
 export interface ListsUserRow {
@@ -73,6 +75,7 @@ declare module '@koishijs/console' {
     'hdsi/lists/save'(payload: { users?: unknown[], groups?: unknown[] }): Promise<ListsSaveResult>
     'hdsi/lists/decide'(payload: { qq: string, approve: boolean, note?: string }): Promise<ListsSaveResult & { request?: AccessRequestRow }>
     'hdsi/ops/report'(payload: { date?: string }): Promise<{ ok: boolean, text?: string, error?: string }>
+    'hdsi/ops/usage'(payload: { preset?: string, limit?: number }): Promise<UsageAnalyticsResult>
   }
 }
 
@@ -239,4 +242,14 @@ export function installOpsRpc(ctx: Context, host: InterludeService, configSchema
     const input = await gatherDailyReportInput(host, anchor)
     return { ok: true, text: renderDailyReport(input) }
   })()), { authority: WRITE })
+
+  ctx.console.addListener('hdsi/ops/usage', payload => Promise.resolve((async (): Promise<UsageAnalyticsResult> => {
+    const preset: UsagePreset = payload?.preset === 'yesterday' || payload?.preset === '7d' ? payload.preset : 'today'
+    const limit = Math.min(200, Math.max(10, Number(payload?.limit) || 50))
+    try {
+      return await gatherUsageAnalytics(host, preset, limit)
+    } catch (error: any) {
+      return { ok: false, error: error?.message ?? String(error), preset, range: { from: 0, to: 0 }, bucketMode: preset === '7d' ? 'day' : 'hour', totals: { calls: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cost: 0 }, byTask: [], buckets: [], recent: [] }
+    }
+  })()), { authority: READ })
 }

@@ -14,6 +14,7 @@ const pages: Array<{ id: string, path: string, label: string, group: string, ico
   { id: 'actions', path: '/hdsi/actions', label: '通信动作', group: '观测', icon: 'actions', component: defineAsyncComponent(() => import('./pages/ActionsPage.vue')) },
   { id: 'density', path: '/hdsi/density', label: '上下文预算', group: '观测', icon: 'density', component: defineAsyncComponent(() => import('./pages/DensityPage.vue')) },
   { id: 'debug', path: '/hdsi/debug', label: '调试', group: '观测', icon: 'debug', component: defineAsyncComponent(() => import('./pages/DebugPage.vue')) },
+  { id: 'usage', path: '/hdsi/usage', label: '调用分析', group: '观测', icon: 'usage', component: defineAsyncComponent(() => import('./pages/UsagePage.vue')) },
   { id: 'lists', path: '/hdsi/lists', label: '名单', group: '配置', icon: 'lists', component: defineAsyncComponent(() => import('./pages/ListsPage.vue')) },
 ]
 
@@ -24,7 +25,7 @@ const activeId = computed(() => {
   return pages.some(p => p.id === first) ? first : 'overview'
 })
 
-const needsOverview = computed(() => !['config', 'config-center', 'actions', 'debug', 'lists'].includes(activeId.value))
+const needsOverview = computed(() => !['config', 'config-center', 'actions', 'debug', 'usage', 'lists'].includes(activeId.value))
 const overview = ref<any>(null)
 const loading = ref(true)
 const failed = ref('')

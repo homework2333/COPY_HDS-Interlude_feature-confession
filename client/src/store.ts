@@ -102,6 +102,22 @@ export const store = {
   async opsReport(date?: string): Promise<{ ok: boolean, text?: string, error?: string }> {
     return send('hdsi/ops/report', { date })
   },
+  /** 调用分析：用量汇总/趋势分桶/最近流水（authority=1，30s 轮询）。 */
+  async opsUsage(preset: 'today' | 'yesterday' | '7d' = 'today', limit = 50): Promise<UsageAnalyticsView> {
+    return send('hdsi/ops/usage', { preset, limit })
+  },
+}
+
+export interface UsageAnalyticsView {
+  ok: boolean
+  error?: string
+  preset: 'today' | 'yesterday' | '7d'
+  range: { from: number, to: number }
+  bucketMode: 'hour' | 'day'
+  totals: { calls: number, inputTokens: number, outputTokens: number, cachedInputTokens: number, cost: number }
+  byTask: Array<{ task: string, model: string, calls: number, inputTokens: number, outputTokens: number, cachedInputTokens: number, cost: number }>
+  buckets: Array<{ label: string, calls: number, inputTokens: number, cachedInputTokens: number, outputTokens: number, cost: number }>
+  recent: Array<{ id: number, ts: number, task: string, model: string, inputTokens: number, outputTokens: number, cachedInputTokens: number, cost: number }>
 }
 
 export interface CommunicationActionRowView {
