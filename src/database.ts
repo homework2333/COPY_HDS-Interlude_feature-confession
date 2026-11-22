@@ -303,6 +303,6 @@ function registerOpsTables(ctx: Context) {
   ctx.model.extend('interlude_access_request', {
     id: 'unsigned', qq: 'string(63)', displayName: 'string(255)', source: 'string(32)',
     firstRequestAt: 'timestamp', lastRequestAt: 'timestamp', attempts: 'unsigned',
-    status: 'string(16)', decidedAt: 'timestamp', note: 'text',
+    status: 'string(16)', decidedAt: 'timestamp', note: 'text', flag: 'string(255)',
   }, { primary: 'id', autoInc: true, indexes: ['qq', 'status'] })
 }

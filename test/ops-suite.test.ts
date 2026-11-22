@@ -297,3 +297,48 @@ test('sendOpsPrivate：走 bot.sendMessage("private:<qq>")（Bot 基类没有 se
   // 目标无法归一化 → 直接 false。
   assert.equal(await runtime.sendOpsPrivate(svc, '', '测试'), false)
 })
+
+/* ── 好友申请自动授权：flag 落库与检索 ─────────────────────────────── */
+
+test('好友申请：flag 落库、按 flag 检索、通知文案指向自动授权', async () => {
+  const app = new Context()
+  app.plugin(SQLiteDriver, { path: ':memory:' })
+  let finished!: (value?: unknown) => void
+  const done = new Promise(resolve => { finished = resolve })
+  app.inject(['database'], async ctx => {
+    try {
+      registerTables(ctx)
+      const { svc, sent } = fakeSvc(ctx)
+      svc.sendOpsPrivate = async (qq: string, text: string) => { sent.push({ qq, text }); return true }
+      const session: any = {
+        platform: 'onebot', userId: '888777666', username: '小友', content: '加个好友呗', messageId: 'FLAG-XYZ',
+      }
+      const runtime = await import('../src/ops/runtime')
+      await runtime.noteFriendRequest(svc, session)
+      const row = await runtime.findAccessRequestByFlag(svc, 'FLAG-XYZ')
+      assert.ok(row, '按 flag 找回了申请行')
+      assert.equal(row.qq, '888777666')
+      assert.equal(row.flag, 'FLAG-XYZ')
+      assert.equal(row.status, 'pending')
+      assert.equal(row.note, '加个好友呗')
+      // 通知文案：同意好友即自动进白名单，不再要求手动 interlude.授权。
+      const notify = sent.find(item => item.text.includes('收到好友申请'))
+      assert.ok(notify)
+      assert.equal(notify.text.includes('自动进白名单'), true)
+      assert.equal(notify.text.includes('interlude.好友同意 FLAG-XYZ'), true)
+      assert.equal(notify.text.includes('interlude.授权'), false)
+      // 未知 flag 安全返回 null（命令给出"好友落定后自动加入"的降级话术）。
+      assert.equal(await runtime.findAccessRequestByFlag(svc, 'STALE-FLAG'), null)
+      finished()
+    } catch (error) {
+      finished(error)
+    }
+  })
+  try {
+    await app.start()
+    const error = await done
+    if (error) throw error
+  } finally {
+    await app.stop()
+  }
+})

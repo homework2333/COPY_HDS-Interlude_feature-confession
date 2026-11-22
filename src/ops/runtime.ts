@@ -12,6 +12,7 @@ import type { DailyReportConfig } from './types'
 import type { DailyReportInput, HostStatusSnapshot } from './daily-report'
 import { localDayRange, nextDailyRun, renderDailyReport, usageRowsToAgg } from './daily-report'
 import { isOneBotPlatform, normalizeAccountId } from '../session-platform'
+import { offPeakDiscountMultiplier, type ProviderOffPeakPricing } from '../narrator'
 import { HDS_INTERLUDE_VERSION } from '../meta'
 
 /** 日报覆盖“刚结束的这一天”：触发时刻回退一分钟取上一个自然日。 */
@@ -87,30 +88,35 @@ function managerTargets(svc: any): string[] {
 
 /* ── 用量 / 错误落库 ──────────────────────────────────────────────── */
 
-/** 按连接价格字段（每百万 token）估算单次调用费用。 */
+/** 按连接价格字段（每百万 token）估算单次调用费用；record.priceOffPeak 启用
+ * 且 now（北京时间）处于错峰窗口时，整体按折扣系数计价。 */
 export function estimateTokenCost(record: {
   inputTokens?: number, outputTokens?: number, cachedInputTokens?: number,
   priceInput?: number, priceOutput?: number, priceCachedInput?: number,
-}): number {
+  priceOffPeak?: ProviderOffPeakPricing,
+}, now: Date = new Date()): number {
   const input = record.inputTokens ?? 0
   const output = record.outputTokens ?? 0
   const cached = record.cachedInputTokens ?? 0
   const uncached = Math.max(0, input - cached)
-  return (uncached * (record.priceInput ?? 0) + cached * (record.priceCachedInput ?? 0) + output * (record.priceOutput ?? 0)) / 1_000_000
+  const base = (uncached * (record.priceInput ?? 0) + cached * (record.priceCachedInput ?? 0) + output * (record.priceOutput ?? 0)) / 1_000_000
+  return base * offPeakDiscountMultiplier(record.priceOffPeak, now)
 }
 
 export function persistUsageRecord(svc: any, record: {
   task: string, providerLabel: string, model: string,
   inputTokens?: number, outputTokens?: number, cachedInputTokens?: number,
   priceInput?: number, priceOutput?: number, priceCachedInput?: number,
+  priceOffPeak?: ProviderOffPeakPricing,
 }): void {
   if (typeof svc?.dbCreate !== 'function') return
+  const now = new Date()
   void svc.dbCreate('interlude_usage_log', {
-    ts: new Date(), task: String(record.task ?? 'unknown').slice(0, 63),
+    ts: now, task: String(record.task ?? 'unknown').slice(0, 63),
     providerLabel: String(record.providerLabel ?? '').slice(0, 127),
     model: String(record.model ?? '').slice(0, 127),
     inputTokens: record.inputTokens ?? 0, outputTokens: record.outputTokens ?? 0,
-    cachedInputTokens: record.cachedInputTokens ?? 0, cost: estimateTokenCost(record),
+    cachedInputTokens: record.cachedInputTokens ?? 0, cost: estimateTokenCost(record, now),
   }).catch((error: unknown) => {
     svc.reportStandalone?.('warn', '用量落库失败 错误=%s', error)
   })
@@ -218,7 +224,7 @@ export async function cleanupOpsTables(svc: any): Promise<void> {
 
 /* ── 白名单申请 ───────────────────────────────────────────────────── */
 
-async function upsertAccessRequest(svc: any, qq: string, displayName: string, source: string, note: string): Promise<AccessRequestRow> {
+async function upsertAccessRequest(svc: any, qq: string, displayName: string, source: string, note: string, flag?: string): Promise<AccessRequestRow> {
   const now = new Date()
   const rows = await svc.dbGet('interlude_access_request', { qq }) as AccessRequestRow[]
   if (rows.length) {
@@ -229,19 +235,20 @@ async function upsertAccessRequest(svc: any, qq: string, displayName: string, so
       displayName: displayName || row.displayName,
       status: row.status === 'approved' ? 'approved' : 'pending',
       note: note || row.note,
+      ...(flag ? { flag } : {}),
     }
     await svc.dbSet('interlude_access_request', { id: row.id }, updated)
     return { ...updated, id: row.id }
   }
   const created = await svc.dbCreate('interlude_access_request', {
     qq, displayName, source, firstRequestAt: now, lastRequestAt: now,
-    attempts: 1, status: 'pending', note,
+    attempts: 1, status: 'pending', note, ...(flag ? { flag } : {}),
   }) as AccessRequestRow
   svc.opsBus?.publish({ kind: 'access', qq, displayName, source, status: 'pending' })
   return Array.isArray(created) ? created[0] : created
 }
 
-async function notifyManagers(svc: any, text: string): Promise<void> {
+export async function notifyManagers(svc: any, text: string): Promise<void> {
   if (opsConfig(svc).accessRequests?.notifyManagers === false) return
   for (const target of managerTargets(svc)) {
     const ok = await deliverPrivate(svc, target, text)
@@ -276,7 +283,7 @@ export async function noteAccessRequest(svc: any, session: Session): Promise<boo
   return true
 }
 
-/** 好友申请：记录 + 通知管理员（附 flag）。 */
+/** 好友申请：记录（含 flag）+ 通知管理员。同意好友后白名单自动生效。 */
 export async function noteFriendRequest(svc: any, session: Session): Promise<void> {
   const config = opsConfig(svc).accessRequests
   if (config?.enabled === false) return
@@ -285,16 +292,27 @@ export async function noteFriendRequest(svc: any, session: Session): Promise<voi
   const displayName = String(session.username || session.author?.nickname || qq).slice(0, 255)
   const comment = String(session.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)
   const flag = String(session.messageId ?? '')
-  await upsertAccessRequest(svc, qq, displayName, 'friend-request', comment)
+  await upsertAccessRequest(svc, qq, displayName, 'friend-request', comment, flag)
   await notifyManagers(svc, [
     '【收到好友申请】',
     `申请人：${displayName}(${qq})`,
     `验证消息：${comment || '(无)'}`,
     '',
-    `同意好友：interlude.好友同意 ${flag}`,
+    `同意好友（自动进白名单）：interlude.好友同意 ${flag}`,
     `拒绝好友：interlude.好友拒绝 ${flag}`,
-    '同意后记得加白名单：interlude.授权 ' + qq,
   ].join('\n'))
+}
+
+/** 好友同意/拒绝命令：用通知里的 flag 找回对应申请（QQ 号、昵称、验证消息）。 */
+export async function findAccessRequestByFlag(svc: any, flag: string): Promise<AccessRequestRow | null> {
+  const target = String(flag ?? '').trim()
+  if (!target) return null
+  try {
+    const rows = await svc.dbGet('interlude_access_request', { flag: target }) as AccessRequestRow[]
+    return rows?.[0] ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function listAccessRequests(svc: any, status?: string): Promise<AccessRequestRow[]> {

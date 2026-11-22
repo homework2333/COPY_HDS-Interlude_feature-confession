@@ -3,7 +3,8 @@
  * - hdsi/ops/recent      调试事件流（环形缓冲最近事件 + 统计；authority=1）
  * - hdsi/lists/read      名单页合并视图（白名单 + 群聊 + 申请 + 参与者状态）
  * - hdsi/lists/save      保存私聊用户/群聊白名单（经配置中心管线持久化）
- * - hdsi/lists/decide    审批白名单申请（approve 时同步写入 onebot.userAccounts）
+ * - hdsi/lists/decide    审批白名单申请（approve 时同步写入 onebot.userAccounts；
+ *                         好友申请行同时回执 QQ 侧同意/拒绝）
  * - hdsi/ops/report      日报预览（authority=3，与 interlude.日报 同源）
  * - hdsi/ops/usage       调用分析：用量汇总/趋势分桶/最近流水（authority=1，30s 轮询）
  *
@@ -218,6 +219,8 @@ export function installOpsRpc(ctx: Context, host: InterludeService, configSchema
     const qq = String(payload?.qq ?? '').trim()
     if (!/^\d{5,12}$/.test(qq)) return { ok: false, error: 'QQ 号无效。' }
     const approve = payload?.approve === true
+    const existingRows = await ((host as any).dbGet('interlude_access_request', { qq }) as Promise<AccessRequestRow[]>)
+    const existing = existingRows?.[0]
     if (approve) {
       const accounts = host.config.onebot?.userAccounts ?? []
       if (!host.config.onebot?.enabled) return { ok: false, error: '当前未启用 OneBot 白名单（onebot.enabled=false）。' }
@@ -229,6 +232,16 @@ export function installOpsRpc(ctx: Context, host: InterludeService, configSchema
       }
     }
     const request = await recordAccessDecision(host, qq, approve, payload?.note ?? '')
+    // 好友申请行：页面审批同步回执 QQ 侧（同意/拒绝好友本身），flag 过期时忽略。
+    if (existing?.source === 'friend-request' && existing.flag) {
+      for (const bot of (host as any).ctx.bots as any[]) {
+        if (bot.platform !== 'onebot') continue
+        try {
+          await bot.handleFriendRequest(existing.flag, approve)
+          break
+        } catch { /* flag 可能已过期，审批记录仍然成立 */ }
+      }
+    }
     return { ok: true, request: request ?? undefined }
   })()), { authority: WRITE })
 

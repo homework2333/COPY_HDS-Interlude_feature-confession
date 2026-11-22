@@ -15,10 +15,19 @@ import { installDesktopBridge } from './desktop-bridge'
 import { installHdsiConsole } from './console'
 import { applyConfigSectionPatch } from './console/config-center'
 import {
-  dailyReportConfig, gatherDailyReportInput, listAccessRequests, noteAccessRequest,
-  noteFriendRequest, recordAccessDecision, renderDailyReport, sendOpsPrivate,
+  dailyReportConfig, findAccessRequestByFlag, gatherDailyReportInput, listAccessRequests, noteAccessRequest,
+  noteFriendRequest, notifyManagers, recordAccessDecision, renderDailyReport, sendOpsPrivate,
 } from './ops/runtime'
+import { normalizeAccountId } from './platform/identity'
 import { fetchShare, summarizeShare, formatDiffLines, buildConfigPatch, runAutoSync, readSyncState, snapshotDeepCopy } from './share-sync'
+
+// OneBot 适配器把 friend_add 通知转成 session.type="friend-added" 并以此派发事件，
+// 但没有进类型表（与 friend-request 不同）。这里补上声明，事件本身运行时可用。
+declare module 'koishi' {
+  interface Events {
+    'friend-added'(session: Session): void
+  }
+}
 export { fetchShare, sanitizeSharePayload, summarizeShare, formatDiffLines, buildConfigPatch, diffSection, storyDefaultsToSettingPatch, normalizeShareCode, SHARE_SECTIONS, runAutoSync, readSyncState, writeSyncState } from './share-sync'
 export type { ShareInfo, ShareSection, SectionDiff, ShareSummaryLines, SyncState, AutoUpdateResult } from './share-sync'
 
@@ -813,7 +822,47 @@ export function apply(ctx: Context, config: InterludeConfig) {
     void noteFriendRequest(service, session).catch(error =>
       startupLogger.warn('好友申请通知失败:%s', (error as Error).message))
   })
+  // 新好友落定（好友同意命令 / QQ 客户端手动同意 / 任何途径）：自动加入私聊
+  // 白名单——管理员只需要决定同意或拒绝好友本身。
+  ctx.on('friend-added', session => {
+    void (async () => {
+      const qq = normalizeAccountId(session.userId)
+      if (!qq) return
+      const add = await addWhitelistAccount(service, qq, '好友自动授权')
+      if (!add.ok) {
+        startupLogger.warn('好友白名单自动授权失败 目标=%s %s', qq, add.error || '')
+        return
+      }
+      await recordAccessDecision(service, qq, true, add.already ? '成为好友（已在白名单）' : '好友自动授权')
+      if (!add.already) {
+        await notifyManagers(service, `新好友 ${qq} 已自动加入私聊白名单。`)
+        service.opsPublishLog?.('info', 'access', 'HDSI', `新好友 ${qq} 已自动加入私聊白名单`)
+      }
+    })().catch(error => startupLogger.warn('好友白名单自动授权失败:%s', (error as Error).message))
+  })
   if (!blindModeEnabled) startupLogger.info('plugin load completed')
+}
+
+/** 把 QQ 写入私聊白名单（onebot.userAccounts），已在名单则跳过。
+ * 授权命令、好友同意命令与 friend-added 事件三条路径共用；每次现读
+ * service.config，保证连续授权不会基于过期列表产生重复行。
+ * 单形状返回（非判别联合）：仓库未开 strictNullChecks，布尔字面量
+ * 判别式会被拓宽成 boolean 导致收窄失效。 */
+interface WhitelistWriteResult { ok: boolean, already: boolean, error?: string }
+
+async function addWhitelistAccount(
+  service: InterludeService, target: string, label: string,
+): Promise<WhitelistWriteResult> {
+  if (!service.config.onebot?.enabled) {
+    return { ok: false, already: false, error: '当前未启用 OneBot 白名单（onebot.enabled=false），所有私聊本就放行。' }
+  }
+  const accounts = (service.config.onebot.userAccounts ?? []) as OneBotAccountRule[]
+  if (accounts.some(account => String(account.qq).trim() === target)) return { ok: true, already: true }
+  const result = applyConfigSectionPatch(service, Config, 'onebot', {
+    userAccounts: [...accounts, { qq: target, label: label.slice(0, 64), enabled: true }],
+  })
+  if (!result.ok) return { ok: false, already: false, error: `写入白名单失败：${result.error}` }
+  return { ok: true, already: false }
 }
 
 function registerCommands(ctx: Context, service: InterludeService, config: InterludeConfig) {
@@ -985,18 +1034,11 @@ function registerCommands(ctx: Context, service: InterludeService, config: Inter
       const error = qqArgError(String(qq ?? ''))
       if (error) return error
       const target = String(qq).trim()
-      if (!config.onebot?.enabled) return '当前未启用 OneBot 白名单（onebot.enabled=false），所有私聊本就放行。'
-      const accounts = config.onebot.userAccounts ?? []
-      if (accounts.some(account => String(account.qq).trim() === target)) {
-        await recordAccessDecision(service, target, true, note ?? '')
-        return `${target} 已在私聊白名单中（申请记录已更新）。`
-      }
-      const result = applyConfigSectionPatch(service, Config, 'onebot', {
-        userAccounts: [...accounts, { qq: target, label: (note ?? '').slice(0, 64), enabled: true }],
-      })
-      if (!result.ok) return `写入白名单失败：${result.error}`
+      const result = await addWhitelistAccount(service, target, note ?? '')
+      if (!result.ok) return result.error || '写入白名单失败。'
       await recordAccessDecision(service, target, true, note ?? '')
       ctx.logger('hds-interlude').info('白名单授权 目标=%s 操作人=%s', target, session?.userId ?? 'console')
+      if (result.already) return `${target} 已在私聊白名单中（申请记录已更新）。`
       return [
         `已授权 ${target} 进入私聊白名单。`,
         '该用户下次私聊时会自动加入共享主剧本（autoEnrollParticipants 默认开启）。',
@@ -1028,36 +1070,53 @@ function registerCommands(ctx: Context, service: InterludeService, config: Inter
       ).join('\n')
     })
 
-  ctx.command('interlude.好友同意 <flag:string>', '管理员：同意一条好友申请（flag 来自申请通知）')
+  ctx.command('interlude.好友同意 <flag:string>', '管理员：同意好友申请（对方自动加入私聊白名单，无需再手动授权）')
     .alias('interlude.friend.accept')
     .action(async ({ session }, flag) => {
       if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
       const target = String(flag ?? '').trim()
       if (!target) return '请提供申请通知里的 flag。'
+      const row = await findAccessRequestByFlag(service, target)
+      let approved = false
       for (const bot of ctx.bots) {
         if (bot.platform !== 'onebot') continue
         try {
           await bot.handleFriendRequest(target, true)
-          return `已同意好友申请（flag=${target.slice(0, 16)}…）。记得用 interlude.授权 <QQ> 把对方加进白名单。`
+          approved = true
+          break
         } catch { /* 尝试下一个在线账号 */ }
       }
-      return '操作失败：没有可用的 OneBot 账号，或 flag 已过期。'
+      if (!approved) return '操作失败：没有可用的 OneBot 账号，或 flag 已过期。'
+      if (!row?.qq) return '已同意好友申请；对方成为好友后将被自动加入私聊白名单。'
+      const add = await addWhitelistAccount(service, row.qq, row.displayName || '')
+      await recordAccessDecision(service, row.qq, true, '好友申请同意（自动授权）')
+      service.opsPublishLog?.('info', 'access', 'HDSI', `好友申请已同意：${row.displayName || row.qq}（${row.qq}）` +
+        (add.ok ? (add.already ? '，白名单本已包含' : '，已自动加入白名单') : '，白名单写入失败'))
+      if (add.ok) return `已同意好友申请（${row.displayName || row.qq}，${row.qq}），并已自动加入私聊白名单。`
+      return `已同意好友申请（${row.qq}），但白名单写入失败：${add.error || '未知原因'}\n请手动执行 interlude.授权 ${row.qq}`
     })
 
-  ctx.command('interlude.好友拒绝 <flag:string>', '管理员：拒绝一条好友申请')
+  ctx.command('interlude.好友拒绝 <flag:string>', '管理员：拒绝好友申请')
     .alias('interlude.friend.reject')
     .action(async ({ session }, flag) => {
       if (!requireManager(service, session)) return '当前 QQ 没有共享主剧本的管理权限。'
       const target = String(flag ?? '').trim()
       if (!target) return '请提供申请通知里的 flag。'
+      const row = await findAccessRequestByFlag(service, target)
+      let handled = false
       for (const bot of ctx.bots) {
         if (bot.platform !== 'onebot') continue
         try {
           await bot.handleFriendRequest(target, false)
-          return '已拒绝好友申请。'
+          handled = true
+          break
         } catch { /* 尝试下一个在线账号 */ }
       }
-      return '操作失败：没有可用的 OneBot 账号，或 flag 已过期。'
+      if (!handled) return '操作失败：没有可用的 OneBot 账号，或 flag 已过期。'
+      if (!row?.qq) return '已拒绝好友申请。'
+      await recordAccessDecision(service, row.qq, false, '好友申请拒绝')
+      service.opsPublishLog?.('info', 'access', 'HDSI', `好友申请已拒绝：${row.displayName || row.qq}（${row.qq}）`)
+      return `已拒绝好友申请（${row.displayName || row.qq}，${row.qq}），申请记录已保留。`
     })
 
   ctx.command('interlude.日报 [date:string]', '管理员：生成并发送一份运营日报（date 形如 2026-11-21，默认刚结束的这一天）')

@@ -76,7 +76,7 @@ test('existing installations extend raw script entries with persistent embedding
     { name: 'interlude_access_request', fields: {
       id: 'unsigned', qq: 'string(63)', displayName: 'string(255)', source: 'string(32)',
       firstRequestAt: 'timestamp', lastRequestAt: 'timestamp', attempts: 'unsigned',
-      status: 'string(16)', decidedAt: 'timestamp', note: 'text',
+      status: 'string(16)', decidedAt: 'timestamp', note: 'text', flag: 'string(255)',
     } },
   ])
 })
@@ -147,7 +147,7 @@ test('knowledge evidence is an additive nullable field and reload does not rebui
     { name: 'interlude_access_request', fields: {
       id: 'unsigned', qq: 'string(63)', displayName: 'string(255)', source: 'string(32)',
       firstRequestAt: 'timestamp', lastRequestAt: 'timestamp', attempts: 'unsigned',
-      status: 'string(16)', decidedAt: 'timestamp', note: 'text',
+      status: 'string(16)', decidedAt: 'timestamp', note: 'text', flag: 'string(255)',
     } },
   ])
 })
