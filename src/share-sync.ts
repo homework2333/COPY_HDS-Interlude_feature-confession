@@ -27,7 +27,7 @@ export const SHARE_SECTIONS = [
 export type ShareSection = typeof SHARE_SECTIONS[number]
 
 /** 分区内部绝不允许出现的字段名(深度扫描)。 */
-const FORBIDDEN_FIELDS = /^(apiKey|endpoint|extraHeaders|proxyAgent|deliveryBaseUrl|priceInput|priceOutput|priceCachedInput)$/i
+const FORBIDDEN_FIELDS = /^(apiKey|endpoint|extraHeaders|proxyAgent|deliveryBaseUrl|priceInput|priceOutput|priceCachedInput|priceOffPeak)$/i
 const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 /** 插件侧二次清洗:只保留白名单分区,深度剔除连接类字段。 */

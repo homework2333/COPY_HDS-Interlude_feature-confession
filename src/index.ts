@@ -84,6 +84,13 @@ const ProviderAssignments = Schema.object({
   priceInput: Schema.number().min(0).default(0).description('输入单价（百万 tokens；0 不计费）。'),
   priceOutput: Schema.number().min(0).default(0).description('输出单价（百万 tokens；0 不计费）。'),
   priceCachedInput: Schema.number().min(0).default(0).description('缓存输入单价（百万 tokens；0 按输入计）。'),
+  priceOffPeak: Schema.object({
+    enabled: Schema.boolean().default(false).description('启用 DeepSeek 峰谷价（错峰优惠）：错峰时段内的调用按折扣系数计价，写进用量日志与调用分析的 cost。'),
+    discount: Schema.number().min(0.01).max(1).step(0.01).default(0.5).description('错峰价格系数（乘在输入/缓存/输出单价上）；0.5 = 半价，即 DeepSeek 官方错峰五折。'),
+    start: Schema.string().pattern(/^\d{1,2}:\d{2}$/).default('00:30').description('错峰时段开始（北京时间 HH:mm）。'),
+    end: Schema.string().pattern(/^\d{1,2}:\d{2}$/).default('08:30').description('错峰时段结束（北京时间 HH:mm）；支持跨午夜写法（如 23:00–08:30）。'),
+    weekendAllDay: Schema.boolean().default(false).description('周六/周日全时段按错峰价计（DeepSeek 峰谷规则优化报道口径；以官方价目页为准）。'),
+  }).default({ enabled: false, discount: 0.5, start: '00:30', end: '08:30', weekendAllDay: false }).description('DeepSeek 峰谷价：官方错峰口径为每日 00:30–08:30（北京时间）五折；当前规则以 DeepSeek 价目页为准。').collapse(true),
 })
 
 function OfficialProvider(mode: 'openai-official' | 'moonshot-official' | 'siliconflow-official' | 'openrouter' | 'gemini-openai' | 'gemini-interactions', defaultModel: string, description: string): Schema<any> {
